@@ -50,6 +50,17 @@ BUI_TEST_XDOTOOL=1 xvfb-run -a go test -race -run '^TestX' .
 Tests that need a window are skipped when there is no display. The last command sends real clicks and drags with
 `xdotool`.
 
+## Development
+
+```sh
+just setup-deps   # treefmt, prettier, gofumpt, gci, shfmt, golangci-lint
+just fmt          # format with treefmt
+just lint         # golangci-lint
+just check        # formatting, go.mod tidiness, lint and tests
+```
+
+CI runs the same checks (`.github/workflows/test.yaml`).
+
 ## Licence and source of the binaries
 
 This repository is GPL-2.0-or-later, matching the SPDX headers in BUI's source. Its `LICENSE` file is copied from BUI and

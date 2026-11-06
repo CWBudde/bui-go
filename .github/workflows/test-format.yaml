@@ -1,0 +1,27 @@
+name: test-format
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: extractions/setup-just@v3
+
+      - name: Install formatters
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          just setup-deps
+
+      - name: Check formatting
+        run: just check-formatted

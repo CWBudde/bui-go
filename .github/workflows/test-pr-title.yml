@@ -1,0 +1,35 @@
+name: test-pr-title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  test-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate conventional commit format
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|refactor|docs|test|chore|perf|ci|build|style|revert)(\([^ )]+\))?(!)?: .+$'
+          if echo "$PR_TITLE" | grep -Pq "$pattern"; then
+            echo "✓ PR title follows conventional commit format"
+          else
+            echo "✗ PR title does not follow conventional commit format"
+            echo ""
+            echo "  Got: $PR_TITLE"
+            echo ""
+            echo "  Expected: type[(scope)][!]: description"
+            echo "  Types: feat, fix, refactor, docs, test, chore, perf, ci, build, style, revert"
+            echo "  (scope and ! are optional)"
+            echo "  Examples:"
+            echo "    feat: add batch export endpoint"
+            echo "    feat(measurement): add g unit support"
+            echo "    fix: correct permission on users table"
+            echo "    chore(main): release 0.82.0"
+            exit 1
+          fi
