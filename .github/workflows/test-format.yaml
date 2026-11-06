@@ -16,7 +16,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
 
       - name: Install formatters
         run: |
