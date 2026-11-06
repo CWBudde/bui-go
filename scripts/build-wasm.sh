@@ -62,14 +62,15 @@ if [ ! -d "$src/.git" ]; then
 	git init -q "$src"
 	git -C "$src" remote add origin https://github.com/ppmpreetham/BUI.git
 fi
-if [ "$(git -C "$src" rev-parse HEAD 2>/dev/null || true)" != "$commit" ]; then
-	git -C "$src" fetch -q --depth 1 origin "$commit"
-	git -C "$src" checkout -q --detach FETCH_HEAD
-fi
+# Check before moving HEAD, so a dirty tree is reported and left as it is.
 if [ -n "$(git -C "$src" status --porcelain)" ]; then
 	echo "build-wasm: $src has local changes, so the module would not match BUI_COMMIT:" >&2
 	git -C "$src" status --short >&2
 	exit 1
+fi
+if [ "$(git -C "$src" rev-parse HEAD 2>/dev/null || true)" != "$commit" ]; then
+	git -C "$src" fetch -q --depth 1 origin "$commit"
+	git -C "$src" checkout -q --detach FETCH_HEAD
 fi
 
 # -- flags -------------------------------------------------------------------
