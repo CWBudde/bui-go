@@ -9,6 +9,7 @@ package bui
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"runtime/cgo"
 	"unsafe"
@@ -53,6 +54,9 @@ func (n *Node) live() *C.BKNode {
 
 func (n *Node) closed() bool { return n.c == nil }
 
+// ErrUnknownProperty is returned (wrapped) by SetNum and SetStr for a key the kit does not know.
+var ErrUnknownProperty = errors.New("bui: unknown property")
+
 // SetNum sets a number property. The error reports a key unknown to the kit.
 // A notifying key such as "set_value" runs handlers before SetNum returns.
 func (n *Node) SetNum(key string, v float64) error {
@@ -62,7 +66,7 @@ func (n *Node) SetNum(key string, v float64) error {
 	ok := C.BK_set_num(c, ck, C.double(v)) != 0
 	runDeferred()
 	if !ok {
-		return fmt.Errorf("bui: unknown number property %q", key)
+		return fmt.Errorf("%w: number property %q", ErrUnknownProperty, key)
 	}
 	return nil
 }
@@ -76,7 +80,7 @@ func (n *Node) SetStr(key, v string) error {
 	ok := C.BK_set_str(c, ck, cv) != 0
 	runDeferred()
 	if !ok {
-		return fmt.Errorf("bui: unknown string property %q", key)
+		return fmt.Errorf("%w: string property %q", ErrUnknownProperty, key)
 	}
 	return nil
 }
@@ -212,7 +216,7 @@ func (n *Node) Close() {
 // uses as its root.
 func liveRootIn(c *C.BKNode) *Node {
 	if h := C.bui_node_handle(c); h != 0 {
-		n := cgo.Handle(h).Value().(*Node)
+		n := nodeOf(h)
 		if n.owner != nil && !n.owner.closing {
 			return n
 		}
@@ -249,7 +253,7 @@ func freeChildren(c *C.BKNode) {
 	for i := int(C.BK_node_child_count(c)) - 1; i >= 0; i-- {
 		child := C.BK_node_child(c, C.int(i))
 		if h := C.bui_node_handle(child); h != 0 {
-			cgo.Handle(h).Value().(*Node).free()
+			nodeOf(h).free()
 		} else {
 			freeChildren(child)
 		}

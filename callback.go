@@ -24,6 +24,12 @@ func newHandle(n *Node) cgo.Handle {
 	return cgo.NewHandle(n)
 }
 
+// nodeOf resolves a handle made by newHandle. Handles only ever hold *Node, so
+// a failed assertion is a bug and panics.
+func nodeOf[H ~uintptr | ~uint64](h H) *Node {
+	return cgo.Handle(h).Value().(*Node) //nolint:forcetypeassert // see above
+}
+
 func deleteHandle(h cgo.Handle) {
 	h.Delete()
 	liveHandles--
@@ -87,7 +93,7 @@ func exitIfUnwinding(returned *bool) {
 func buiGoEmit(h C.uintptr_t, kind C.int, a C.double) {
 	returned := false
 	defer exitIfUnwinding(&returned)
-	n := cgo.Handle(h).Value().(*Node)
+	n := nodeOf(h)
 	if n.closing {
 		returned = true
 		return
