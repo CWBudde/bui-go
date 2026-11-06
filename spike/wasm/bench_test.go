@@ -126,7 +126,7 @@ func BenchmarkHover(b *testing.B) {
 
 // BenchmarkStartup measures what the lazy module load in Phase 2 would cost:
 // a new runtime, compile, instantiate and _initialize. "cold" has no cache,
-// "cached" a populated file compilation cache, as in os.UserCacheDir.
+// "cached" a new cache over a populated directory, as in os.UserCacheDir.
 func BenchmarkStartup(b *testing.B) {
 	bin, err := ReadModule("bui_kit.wasm")
 	skipIfNotBuilt(b, err)
@@ -149,27 +149,46 @@ func BenchmarkStartup(b *testing.B) {
 
 		b.Run(string(engine)+"/cached", func(b *testing.B) {
 			ctx := context.Background()
+			dir := b.TempDir()
 
-			cache, err := wazero.NewCompilationCacheWithDir(b.TempDir())
+			// Warm the directory through a cache that is closed again. One cache
+			// instance also shares compiled code in memory, so each iteration
+			// opens a new one: only the files on disk carry over, as in a new
+			// process.
+			warmCache, err := wazero.NewCompilationCacheWithDir(dir)
 			if err != nil {
 				b.Fatal(err)
 			}
 
-			warm, err := NewWasmKit(ctx, engine, cache, bin, nil)
+			warm, err := NewWasmKit(ctx, engine, warmCache, bin, nil)
 			if err != nil {
 				b.Fatal(err)
 			}
 
 			warm.Close()
+
+			if err := warmCache.Close(ctx); err != nil {
+				b.Fatal(err)
+			}
+
 			b.ResetTimer()
 
 			for range b.N {
+				cache, err := wazero.NewCompilationCacheWithDir(dir)
+				if err != nil {
+					b.Fatal(err)
+				}
+
 				k, err := NewWasmKit(ctx, engine, cache, bin, nil)
 				if err != nil {
 					b.Fatal(err)
 				}
 
 				k.Close()
+
+				if err := cache.Close(ctx); err != nil {
+					b.Fatal(err)
+				}
 			}
 		})
 	}

@@ -71,7 +71,7 @@ Checked at BUI `e3aba90`, with wazero v1.12.0, wasi-sdk 34.0 and Go 1.26.8. Phas
 
 - wazero's compiler runs at about 2-4x native for rendering and hovering once the module is built with SIMD. Without
   SIMD and the `memcmp` fix it was 5-18x. The interpreter is 100-1000x native, far worse than "an order of magnitude".
-- Cold compile takes 0.5-1.3 s with one compile worker and 0.2 s with four. The file cache brings startup to about 20 ms.
+- Cold compile takes 0.5-1.3 s with one compile worker and 0.2 s with four. The file cache brings the compiler's startup to about 25 ms.
 - wasi-sdk's exnref `setjmp` works with wazero, and its stub pthreads are enough for the kit's mutex and condition calls:
   both now run in tests.
 
@@ -159,7 +159,7 @@ module `spike/wasm`, and `scripts/build-wasm.sh` and `wasm/` stay for later phas
       quiet run (load not recorded; inferred from native's 3.3 ms), but 14-28 ms under a load of 18-22, when native itself took 9-15 ms.** The interpreter misses
       by far.
 - [x] Startup is under 2 s cold and under 100 ms with the compilation cache. **Result: 0.49-1.33 s cold with one compile
-      worker, 0.19-0.22 s with four, 18-21 ms cached.**
+      worker, 0.19-0.22 s with four, 23-25 ms from the file cache on the compiler, 53-56 ms on the interpreter.**
 - [x] Text renders with no font files mounted. **Result: every comparison ran without a mount.**
 
 **No-go fallback:** option A with purego. Phase 1 is useful either way, because it gives that engine the same seam.
@@ -243,8 +243,12 @@ out-of-line `fmaxf`/`fminf` calls per dense frame: wasm's `f32.max` has other Na
 
 | Engine      | cold, 1 compile worker | cold, 4 workers | cached (file cache) |
 | ----------- | ---------------------- | --------------- | ------------------- |
-| compiler    | 0.49 / 0.64 / 1.33 s   | 0.19-0.22 s     | 18-21 ms            |
-| interpreter | 54-59 ms               | 52-56 ms        | 18-20 ms            |
+| compiler    | 0.49 / 0.64 / 1.33 s   | 0.19-0.22 s     | 23-25 ms            |
+| interpreter | 54-59 ms               | 52-56 ms        | 53-56 ms            |
+
+The cached column opens a new cache over a warmed directory in every iteration (load ~2), so only the files on disk carry
+over. An earlier version reused one warmed cache instance, which shares compiled code in memory, and reported 18-21 ms.
+The interpreter gains nothing from the file cache: its cached and cold times are the same.
 
 wazero compiles with one worker by default; `experimental.WithCompilationWorkers` cuts a cold start about 3x.
 
