@@ -201,3 +201,72 @@ func TestRenderSelfTime(t *testing.T) {
 		t.Logf("  %10v  %5.1f%%  %s", f.d/runs, 100*float64(f.d)/float64(total), f.name)
 	}
 }
+
+// TestPairedFrameTimes renders the same tree alternately on the cgo kit and
+// the wasm compiler, one frame each per round, so that both see the same
+// machine load. It reports min and median per kit and the median of the
+// per-round ratios. A diagnostic for PLAN.md; run with BUI_SPIKE_PROFILE=1.
+func TestPairedFrameTimes(t *testing.T) {
+	if os.Getenv("BUI_SPIKE_PROFILE") == "" {
+		t.Skip("diagnostic; set BUI_SPIKE_PROFILE=1")
+	}
+
+	if !NativeAvailable {
+		t.Skip("needs the cgo kit")
+	}
+
+	bin, err := ReadModule("bui_kit.wasm")
+	skipIfNotBuilt(t, err)
+
+	nk := NewNativeKit()
+	defer nk.Close()
+
+	wk, err := NewWasmKit(context.Background(), Compiler, nil, bin, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wk.Close()
+
+	for _, bt := range benchTrees() {
+		var hls [2]Headless
+
+		for i, k := range []Kit{nk, wk} {
+			root, _ := bt.build(k)
+			hls[i] = k.NewHeadless(root, bt.w, bt.h)
+			hls[i].Render()
+
+			defer func(k Kit, hl Headless, root Node) {
+				hl.Close()
+				k.FreeTree(root)
+			}(k, hls[i], root)
+		}
+
+		const rounds = 200
+
+		var times [2][]time.Duration
+
+		ratios := make([]float64, 0, rounds)
+
+		for range rounds {
+			var d [2]time.Duration
+
+			for i, hl := range hls {
+				start := time.Now()
+				hl.Render()
+				d[i] = time.Since(start)
+				times[i] = append(times[i], d[i])
+			}
+
+			ratios = append(ratios, float64(d[1])/float64(d[0]))
+		}
+
+		for i := range times {
+			sort.Slice(times[i], func(a, b int) bool { return times[i][a] < times[i][b] })
+		}
+
+		sort.Float64s(ratios)
+		t.Logf("%s: native min %v median %v; wasm-compiler min %v median %v; ratio median %.2f (p10 %.2f, p90 %.2f)",
+			bt.name, times[0][0], times[0][rounds/2], times[1][0], times[1][rounds/2],
+			ratios[rounds/2], ratios[rounds/10], ratios[rounds*9/10])
+	}
+}
