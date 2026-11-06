@@ -2,40 +2,33 @@
 
 package bui
 
-/*
-#include <stdint.h>
-#include "bridge.h"
-*/
-import "C"
+import "github.com/CWBudde/bui-go/internal/engine"
 
-import (
-	"fmt"
-	"os"
-	"runtime/cgo"
-	"runtime/debug"
+// nodes finds a Node from the id the kit holds for it, so that no Go pointer
+// crosses into the kit. An id is reused only after its node is freed and the
+// counter has wrapped. Like all kit-side state it is UI-thread only and
+// intentionally unlocked, so that -race reports unserialized use.
+var (
+	nodes      = map[uint32]*Node{}
+	lastNodeID uint32
 )
 
-// liveHandles counts Node handles. Like all kit-side state it is UI-thread only
-// and intentionally a plain int, so that -race reports unserialized use.
-var liveHandles int
+// newNodeID skips 0, which means "no id", and the ids of live nodes.
+func newNodeID(n *Node) uint32 {
+	for {
+		lastNodeID++
 
-func newHandle(n *Node) cgo.Handle {
-	liveHandles++
-	return cgo.NewHandle(n)
+		if _, taken := nodes[lastNodeID]; !taken && lastNodeID != 0 {
+			break
+		}
+	}
+
+	nodes[lastNodeID] = n
+
+	return lastNodeID
 }
 
-// nodeOf resolves a handle made by newHandle. Handles only ever hold *Node, so
-// a failed assertion is a bug and panics.
-func nodeOf[H ~uintptr | ~uint64](h H) *Node {
-	return cgo.Handle(h).Value().(*Node) //nolint:forcetypeassert // see above
-}
-
-func deleteHandle(h cgo.Handle) {
-	h.Delete()
-	liveHandles--
-}
-
-func liveHandleCount() int { return liveHandles }
+func liveHandleCount() int { return len(nodes) }
 
 // emitDepth is how many kit events are being delivered on the stack. Non-zero
 // means a kit call is on the stack below the running handler.
@@ -50,13 +43,14 @@ var deferred []func()
 // and break the order window, context, root.
 func closeOrDefer(free func()) {
 	deferred = append(deferred, free)
+
 	if emitDepth == 0 {
 		runDeferred()
 		return
 	}
 	// A handler fired by an X event has no binding call to flush after it.
 	if inLoop {
-		C.BK_window_wake()
+		host.Wake()
 	}
 }
 
@@ -67,48 +61,39 @@ func runDeferred() {
 	if emitDepth > 0 {
 		return
 	}
+
 	for len(deferred) > 0 {
 		free := deferred[0]
 		deferred = deferred[1:]
+
 		free()
 	}
 }
 
-// exitIfUnwinding guards Go code called from C. A panic or Goexit escaping it
-// would abandon the C frames below, leaving the kit's state corrupt (input scope
-// open, pointer grab held), and a recover further up would let the process carry
-// on with that. So it ends the process, whatever callers do. It must be deferred
-// directly, as recover only works there.
-func exitIfUnwinding(returned *bool) {
-	if *returned {
-		return
-	}
-	fmt.Fprintf(os.Stderr, "bui: panic or Goexit in a callback from the kit: %v\n\n%s", recover(), debug.Stack())
-	os.Exit(2)
+func init() {
+	kit.SetEmit(handleEmit)
 }
 
-// buiGoEmit receives every kit event for a node with a handle.
-//
-//export buiGoEmit
-func buiGoEmit(h C.uintptr_t, kind C.int, a C.double) {
-	returned := false
-	defer exitIfUnwinding(&returned)
-	n := nodeOf(h)
+// handleEmit receives every kit event for a node with an id. A panic here ends the
+// process: see engine.ExitIfUnwinding.
+func handleEmit(id uint32, kind int, a float64) {
+	n := nodes[id]
 	if n.closing {
-		returned = true
 		return
 	}
+
 	emitDepth++
+
 	switch kind {
-	case C.BK_EV_CLICK:
+	case engine.EvClick:
 		if n.onClick != nil {
 			n.onClick()
 		}
-	case C.BK_EV_CHANGE:
+	case engine.EvChange:
 		if n.onChange != nil {
-			n.onChange(float64(a))
+			n.onChange(a)
 		}
 	}
+
 	emitDepth--
-	returned = true
 }

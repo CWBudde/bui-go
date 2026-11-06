@@ -9,19 +9,10 @@
 // Do, the only function safe to call from anywhere.
 package bui
 
-/*
-#cgo CFLAGS: -I${SRCDIR}/include
-#cgo linux,amd64 LDFLAGS: -L${SRCDIR}/lib/linux_amd64 -lbui_kit -lbui_gpu -lbui_core -lstdc++ -ldl -lm -lpthread
-#include <stdlib.h>
-#include "bridge.h"
-*/
-import "C"
-
 import (
 	"errors"
 	"runtime"
 	"sync"
-	"unsafe"
 )
 
 // init runs on the main goroutine; this keeps it on the main OS thread.
@@ -39,13 +30,16 @@ var (
 func Do(f func()) {
 	doMu.Lock()
 	defer doMu.Unlock()
+
 	doQueue = append(doQueue, f)
-	C.BK_window_wake()
+
+	host.Wake()
 }
 
 func pendingDo() int {
 	doMu.Lock()
 	defer doMu.Unlock()
+
 	return len(doQueue)
 }
 
@@ -56,17 +50,21 @@ func drainDo() {
 	queue := doQueue
 	doQueue = nil
 	doMu.Unlock()
+
 	next := 0
 	defer func() {
 		if next < len(queue) {
 			doMu.Lock()
+
 			doQueue = append(queue[next:], doQueue...)
 			doMu.Unlock()
 		}
 	}()
+
 	for next < len(queue) {
 		f := queue[next]
 		next++
+
 		f()
 	}
 }
@@ -74,13 +72,7 @@ func drainDo() {
 // EvalNumber evaluates a Blender-style number expression such as "2*pi". The
 // second result is false when the expression is invalid.
 func EvalNumber(expr string) (float64, bool) {
-	cs := C.CString(expr)
-	defer C.free(unsafe.Pointer(cs))
-	var v C.double
-	if C.BK_eval_number(cs, &v) == 0 {
-		return 0, false
-	}
-	return float64(v), true
+	return kit.EvalNumber(expr)
 }
 
 // ErrNoDisplay is returned when the kit cannot open a window system.
@@ -89,7 +81,7 @@ var ErrNoDisplay = errors.New("bui: no display available")
 // Supported reports whether windows can be opened. It opens the display. It is
 // UI-thread only.
 func Supported() bool {
-	return C.BK_window_supported() != 0
+	return host.Supported()
 }
 
 // UI-thread state of the loop.
@@ -107,20 +99,25 @@ func Run() error {
 	if inRun || emitDepth > 0 {
 		panic("bui: Run called from inside Run or a handler")
 	}
+
 	if !Supported() {
 		return ErrNoDisplay
 	}
+
 	inRun = true
 	defer func() { inRun, inLoop = false, false }()
 	// Wakes sent before this were lost, so what they announced runs right here.
 	doMu.Lock()
-	C.bui_wake_init()
+	host.WakeInit(handleWake)
 	doMu.Unlock()
 	runDeferred()
 	drainDo()
+
 	if !quitRequested {
 		inLoop = true
-		C.BK_window_run()
+
+		host.Run()
+
 		inLoop = false
 	}
 	// The loop can end with work pending, such as a handler that closed a node
@@ -128,7 +125,9 @@ func Run() error {
 	// here on waits for the next Run.
 	runDeferred()
 	drainDo()
+
 	quitRequested = false
+
 	return nil
 }
 
@@ -138,22 +137,18 @@ func Run() error {
 // goroutines use Do(Quit).
 func Quit() {
 	if inLoop {
-		C.BK_window_quit()
+		host.Quit()
 		return
 	}
+
 	quitRequested = true
 }
 
-// buiGoWake is the loop's wake callback. It runs inside BK_window_run but outside
-// any kit call, so kit calls and destruction are allowed. Queued destruction goes
+// handleWake is the loop's wake callback. It runs inside the loop but outside any
+// kit call, so kit calls and destruction are allowed. Queued destruction goes
 // first: it was requested before anything these functions will do, and they flush
 // their own, as every binding call that can emit does.
-//
-//export buiGoWake
-func buiGoWake() {
-	returned := false
-	defer exitIfUnwinding(&returned)
+func handleWake() {
 	runDeferred()
 	drainDo()
-	returned = true
 }

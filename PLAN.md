@@ -80,7 +80,7 @@ Checked at BUI `e3aba90`, with wazero v1.12.0, wasi-sdk 34.0 and Go 1.26.8. Phas
 ```
 package bui                 public API (unchanged); owns emitDepth, deferred frees, the Do queue. No cgo.
   engine_cgo.go             //go:build cgo && linux && amd64 && !bui_nocgo     selects cgoengine + its native window
-  engine_wasm.go            //go:build !(cgo && linux && amd64 && !bui_nocgo)  selects wasmengine + Go hosts
+  engine_nocgo.go           //go:build !(cgo && linux && amd64 && !bui_nocgo)  selects wasmengine + Go hosts
   internal/engine           interfaces only: Kit (nodes, geometry, render, input), Host (window, loop, wake)
   internal/engine/cgoengine //go:build cgo && linux && amd64     today's C calls, bridge.c, bridge.h
   internal/engine/wasmengine no constraint: pure Go; embeds bui_kit.wasm; wazero setup and marshalling
@@ -318,18 +318,34 @@ compares the two wasm engines only), `go test -run '^$' -bench 'Render|Hover|Sta
 
 ### Phase 1: engine seam, no behaviour change
 
-- [ ] Define `internal/engine`
-  - [ ] `Kit`: the 28 kit calls and 4 bridge calls in Go types
-  - [ ] `Host`: window, loop, wake and quit
-  - [ ] An emit callback of `(id uint32, kind int, a float64)`
-- [ ] Move C code to `internal/engine/cgoengine`
-  - [ ] Move `bridge.c`, `bridge.h` and every `import "C"`
-  - [ ] Point `#cgo` flags at the root `lib/` and `include/`, and check that the `..` paths pass cgo's flag checks
-  - [ ] Move `cgo.Handle` use inside the engine, and keep `liveHandleCount` working through it
-- [ ] Add the selection files with the `cgo && linux && amd64 && !bui_nocgo` rule
-  - [ ] Keep `exitIfUnwinding` at the point where the kit calls into Go
-- [ ] Exit: the existing suite passes under `-race` and `-asan`, including the opt-in `TestX` run, with `bui_test.go`
+- [x] Define `internal/engine`
+  - [x] `Kit`: the kit and bridge calls in Go types
+  - [x] `Host`: window, loop, wake and quit
+  - [x] An emit callback of `(id uint32, kind int, a float64)`
+- [x] Move C code to `internal/engine/cgoengine`
+  - [x] Move `bridge.c`, `bridge.h` and every `import "C"`
+  - [x] Point `#cgo` flags at the root `lib/` and `include/`, and check that the `..` paths pass cgo's flag checks
+  - [x] Replace `cgo.Handle` with an id table in package `bui`, which both engines share, and keep `liveHandleCount`
+        working through it
+- [x] Add the selection files with the `cgo && linux && amd64 && !bui_nocgo` rule
+  - [x] Keep the unwinding guard at the point where the kit calls into Go, as `engine.ExitIfUnwinding`
+- [x] Exit: the existing suite passes under `-race` and `-asan`, including the opt-in `TestX` run, with `bui_test.go`
       essentially unchanged
+
+Corrections from this phase:
+
+- **The file is `engine_nocgo.go`, not `engine_wasm.go`.** Go reads a `_wasm.go` suffix as `GOARCH=wasm`, so that file
+  would never compile on a real host.
+- **`cgo.Handle` is gone, not moved.** The kit's `ref` field holds a `uint32` id on both engines, so one table in package
+  `bui` serves both, and no handle code is left to port. `liveHandleCount` is now the size of that table.
+- **Kit objects cross the seam as opaque `uintptr` values** (`engine.Node`, `Context`, `Raster`, `Window`), separate from
+  node ids. The tree walks in `Add`, `Close` and `free` pass through kit-internal nodes, which have no id.
+- **The wake panic test moved.** `bui_test.go` can no longer call the guarded wake callback, so that case is now
+  `TestWakePanicExits` in `cgoengine`. Only this case and `nil` checks that became `0` changed in `bui_test.go`.
+- **Without the cgo engine the build still fails**, as it did before, with `undefined: wasmEngineArrivesInPhase2`.
+  Phase 2 replaces that line.
+- **`wsl_v5` now reports package `bui`.** It reported nothing there while the files had `import "C"`, so they picked up
+  blank lines from `golangci-lint --fix`, which adds noise to this phase's diff.
 
 ### Phase 2: wasm engine, headless
 
