@@ -5,16 +5,24 @@ package bui
 import "github.com/CWBudde/bui-go/internal/engine"
 
 // nodes finds a Node from the id the kit holds for it, so that no Go pointer
-// crosses into the kit. An id is never reused. Like all kit-side state it is
-// UI-thread only and intentionally unlocked, so that -race reports unserialized
-// use.
+// crosses into the kit. An id is reused only after its node is freed and the
+// counter has wrapped. Like all kit-side state it is UI-thread only and
+// intentionally unlocked, so that -race reports unserialized use.
 var (
 	nodes      = map[uint32]*Node{}
 	lastNodeID uint32
 )
 
+// newNodeID skips 0, which means "no id", and the ids of live nodes.
 func newNodeID(n *Node) uint32 {
-	lastNodeID++
+	for {
+		lastNodeID++
+
+		if _, taken := nodes[lastNodeID]; !taken && lastNodeID != 0 {
+			break
+		}
+	}
+
 	nodes[lastNodeID] = n
 
 	return lastNodeID

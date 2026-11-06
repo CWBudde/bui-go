@@ -1293,3 +1293,29 @@ func TestXDragClosesSlider(t *testing.T) {
 		t.Fatalf("fired=%d closed=%v, want 1 and true", fired, s.closed())
 	}
 }
+
+// An id is the only link from the kit to a Node, so a counter that wraps must not
+// produce 0, which means "no id", or take the id of a node that is still alive.
+func TestNodeIDWrapSkipsZeroAndLive(t *testing.T) {
+	savedNodes, savedLast := nodes, lastNodeID
+
+	t.Cleanup(func() { nodes, lastNodeID = savedNodes, savedLast })
+
+	live := &Node{}
+	nodes = map[uint32]*Node{1: live}
+	lastNodeID = math.MaxUint32 - 1
+
+	last, next := &Node{}, &Node{}
+
+	if got := newNodeID(last); got != math.MaxUint32 {
+		t.Fatalf("id before the wrap = %d, want %d", got, uint32(math.MaxUint32))
+	}
+
+	if got := newNodeID(next); got != 2 {
+		t.Fatalf("id after the wrap = %d, want 2", got)
+	}
+
+	if nodes[1] != live {
+		t.Fatal("the wrap took the id of a live node")
+	}
+}
