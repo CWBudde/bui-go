@@ -53,9 +53,9 @@ Tests that need a window are skipped when there is no display. The last command 
 ## Development
 
 ```sh
-just setup-deps   # treefmt, prettier, gofumpt, gci, shfmt, golangci-lint
+just setup-deps   # treefmt, prettier, gofumpt, gci, shfmt
 just fmt          # format with treefmt
-just lint         # golangci-lint
+just lint         # golangci-lint, at the version pinned in the justfile
 just check        # formatting, go.mod tidiness, lint and tests
 ```
 

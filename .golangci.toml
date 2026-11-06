@@ -5,7 +5,10 @@ default = 'all'
 disable = [
   'depguard',
   'exhaustive',
+  # Zero values are meaningful here (PackOptions{Fill: FillX}). exhaustruct_v5 is the same rule's
+  # new major version since golangci-lint 2.13; the deprecated name stays active under 'all' too.
   'exhaustruct',
+  'exhaustruct_v5',
   # style linters that fight the cgo/UI-thread design of this binding
   'funcorder',
   'gochecknoglobals',
