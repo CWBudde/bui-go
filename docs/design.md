@@ -7,6 +7,10 @@ Unless a section says otherwise, the facts here were established against BUI `e3
 (clang 23.1.0, wasi-libc `2e6fb9d8ee0c`) and Go 1.26.8, on an Intel i7-1255U (12 threads) running Linux 6.8. That laptop was
 in active use, so absolute times move with its load, and only ratios from one run compare well.
 
+BUI is now pinned at `v0.4.1` (`09a154c`). Since `e3aba90` its kit gained `BK_version` and its version macros, and resetting a widget
+now always goes back to its default, which is the first value it was given unless one is set. The measurements here were not
+repeated at the new pin.
+
 ## Why WebAssembly
 
 Binding through cgo needs a C and C++ toolchain on every build machine, rules out `CGO_ENABLED=0`, plain cross-compilation

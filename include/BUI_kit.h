@@ -16,9 +16,54 @@
 
 #include "GPU_raster.h"
 
+/* ---- Version and stability ------------------------------------------------
+ *
+ * The C API is versioned with BUI itself, as MAJOR.MINOR.PATCH: this header,
+ * the Python wheels, the Rust crates and the npm packages all carry the same
+ * number (tools/check_versions.py fails a release when they differ).
+ *
+ * Before 1.0 there is no promise that the API stays the same: any release may
+ * add to it, and a release may change or remove a function. Every change that
+ * breaks existing code is listed under "C API changes" in CHANGELOG.md, with
+ * what to use instead. Pin a release, not a commit.
+ *
+ * From 1.0 on, semantic versioning: a MAJOR release may break the API, a MINOR
+ * release only adds to it, a PATCH release only fixes bugs, and a deprecated
+ * function (BUI_DEPRECATED) stays for at least one MINOR release.
+ *
+ * ABI: nodes, contexts and the other handles are opaque and stay that way. The
+ * structs you fill in or read (BKHost, BKMenuSpec, BKImageInfo, BKImageStats,
+ * BKCanvasItem, BKCustomEvent) can gain fields before 1.0, so rebuild against
+ * the header of the library you link. BK_version() reports the version of the
+ * library at run time; compare it with BUI_KIT_VERSION from this header when
+ * the two can differ (a shared build, a binding). */
+#define BUI_KIT_VERSION_MAJOR 0
+#define BUI_KIT_VERSION_MINOR 4
+#define BUI_KIT_VERSION_PATCH 1
+#define BUI_KIT_VERSION_STRING "0.4.1"
+/* One number to compare: 0.4.0 is 400, 1.2.3 is 10203. */
+#define BUI_KIT_VERSION \
+  (BUI_KIT_VERSION_MAJOR * 10000 + BUI_KIT_VERSION_MINOR * 100 + BUI_KIT_VERSION_PATCH)
+#define BUI_KIT_VERSION_AT_LEAST(major, minor, patch) \
+  (BUI_KIT_VERSION >= (major) * 10000 + (minor) * 100 + (patch))
+
+/* Marks a function that will be removed; the compiler warns where it is used. */
+#if defined(__GNUC__) || defined(__clang__)
+#  define BUI_DEPRECATED(message) __attribute__((deprecated(message)))
+#elif defined(_MSC_VER)
+#  define BUI_DEPRECATED(message) __declspec(deprecated(message))
+#else
+#  define BUI_DEPRECATED(message)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* The version of the library you are linked against: BUI_KIT_VERSION as it was
+ * when the library was built, and the same as "MAJOR.MINOR.PATCH". */
+int BK_version(void);
+const char *BK_version_string(void);
 
 typedef struct BKNode BKNode;
 typedef struct BKContext BKContext;
