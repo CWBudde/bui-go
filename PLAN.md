@@ -349,14 +349,14 @@ Corrections from this phase:
 
 ### Phase 2: wasm engine, headless
 
-- [ ] Implement `wasmengine`
-  - [ ] Lazy runtime setup, with the compiler where supported and the interpreter elsewhere
-  - [ ] `CoreFeaturesV2 | experimental.CoreFeaturesExceptionHandling` (V2 includes the SIMD the module now uses)
-  - [ ] Compile with `experimental.WithCompilationWorkers` (Phase 0: four workers cut a cold start from 0.5-1.3 s to
+- [x] Implement `wasmengine`
+  - [x] Lazy runtime setup, with the compiler where supported and the interpreter elsewhere
+  - [x] `CoreFeaturesV2 | experimental.CoreFeaturesExceptionHandling` (V2 includes the SIMD the module now uses)
+  - [x] Compile with `experimental.WithCompilationWorkers` (Phase 0: four workers cut a cold start from 0.5-1.3 s to
         0.2 s), capped so a test binary does not swamp the machine
-  - [ ] Real clock, sleep and random sources, stderr wired through, and no file system mounts
-  - [ ] Compilation cache in `os.UserCacheDir()`, falling back without error if it is not writable
-  - [ ] Memory limit through `WithMemoryLimitPages`
+  - [x] Real clock, sleep and random sources, stderr wired through, and no file system mounts
+  - [x] Compilation cache in `os.UserCacheDir()`, falling back without error if it is not writable
+  - [x] Memory limit through `WithMemoryLimitPages`
 - [ ] Implement the calls
   - [ ] String marshalling through `malloc` and `free`, reusing one scratch buffer
   - [ ] Give each call nesting level its own `CallWithStack` slice: handlers re-enter the module during an emit
@@ -369,11 +369,25 @@ Corrections from this phase:
   - [ ] Golden test comparing live pixels across trees (buttons, sliders, text, menus, scrolled views) at the Phase 0
         tolerance, in one test binary. Phase 0 got exact matches, so start strict and loosen only with a reason
   - [ ] Keep the `setjmp` probe (`wasm/sjlj_probe.c`) as a regression test for the exnref build
-- [ ] Commit `internal/engine/wasmengine/bui_kit.wasm`, as with the `.a` files
+- [x] Commit `internal/engine/wasmengine/bui_kit.wasm`, as with the `.a` files
 - [ ] Exit
   - [ ] `CGO_ENABLED=0 go test ./...` passes, with window tests skipped
   - [ ] `go test -tags bui_nocgo -race ./...` passes on a cgo machine
   - [ ] `CGO_ENABLED=0 GOOS={windows,darwin} go build ./...` succeeds
+
+Notes from the runtime work:
+
+- **A cache failure must retry the compile.** wazero checks only that the directory exists when the cache opens. A failed
+  write or a corrupt entry then fails `CompileModule`, so `load` retries without a cache on any failure.
+- **The interpreter fallback ran for real.** `CGO_ENABLED=0 GOARCH=386 go test ./internal/engine/wasmengine/` passes, and
+  wazero has no compiler there, so the default configuration chose the interpreter by itself.
+- **Compile workers, through `load`:** a median of 274 ms cold (12 runs, four workers) against 720 ms with wazero's default
+  of one. No test can see the worker count, so this is a measurement, not a regression test.
+- **The memory limit is 16384 pages (1 GiB).** Past it `malloc` returns 0 with no trap. Phase 4 decides what the binding
+  does then.
+- **The module is byte-identical on rebuild.** `build-wasm.sh` now copies it into the package, and re-running the script
+  leaves `git status` clean in this checkout.
+- **The golden test needs a new `Kit` call.** `engine.Kit` cannot read raster pixels yet, on either engine.
 
 ### Phase 3: Linux window host in Go
 
@@ -455,8 +469,8 @@ Do not start before Phase 3 proves the `Host` interface. Headless works everywhe
 
 ## Open decisions
 
-- [ ] **Module location:** committed in-tree (the default: consistent with `lib/`, simple `go get`) or a release asset.
-      Phase 0 size: 3.29 MiB (1.26 MiB gzipped) per rebuild, so each kit update adds about that much to the history.
+- [x] **Module location:** committed in-tree, consistent with `lib/` and a simple `go get`. Phase 0 size: 3.29 MiB
+      (1.26 MiB gzipped) per rebuild, so each kit update adds about that much to the history.
 - [ ] **Font mounts:** whether to expose a public way to add fonts, which would be new API, or stay with Inter for the
       first release (the default).
 
