@@ -9,8 +9,8 @@
  * counts the longjmps and hashes the bitmap, so a test can check that the jump
  * happened and that the result equals a native build of the same sources.
  *
- * Built by scripts/build-wasm.sh into sjlj_probe.wasm, and natively by the
- * spike tests for the reference hash.
+ * Built by scripts/build-wasm.sh into sjlj_probe.wasm. The reference hashes in
+ * internal/engine/wasmengine/sjlj_test.go come from a native build of this file.
  */
 #include <stddef.h>
 #include <stdint.h>

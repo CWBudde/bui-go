@@ -1,7 +1,7 @@
 /third_party/
 /build/
 /counter
-# wasm build output and spike artifacts, except the module the wasm engine embeds
+# wasm build output, except the module the wasm engine embeds
 # and the setjmp probe its tests run
 *.wasm
 !/internal/engine/wasmengine/bui_kit.wasm
