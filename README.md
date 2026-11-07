@@ -90,6 +90,7 @@ that time. The module loads at the first kit call, so importing the package cost
   none today.
 - Only the embedded Inter font works by default.
 - Core X cursors, not the desktop's theme, and no Compose or IME input. A dead key types its own character.
+- Clipboard text that takes X's INCR transfer, past about 256 KiB, is refused in both directions.
 - `EvalNumber` accepts an expression whose intermediate inf or nan turns finite again, such as `1/(1/0)`, as wasm has no
   floating-point exception flags.
 - No guard pages: inside the module a NULL read or a bad offset returns what memory holds, where native code would crash.

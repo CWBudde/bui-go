@@ -35,7 +35,8 @@ func (c callCounts) NewFunctionListener(def api.FunctionDefinition) experimental
 	})
 }
 
-// TestImageStaysPendingWithoutThreads shows the premise of PLAN.md's image decision. The
+// TestImageStaysPendingWithoutThreads shows the premise of the image decision in
+// docs/design.md. The
 // loader decodes only on worker threads, wasip1 cannot create them, and
 // BLI_threadpool_insert ignores the failure, so a request queues forever. The file is
 // readable, so the cause is the threads and not the file system. The native kit

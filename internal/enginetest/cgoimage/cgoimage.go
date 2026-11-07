@@ -3,7 +3,7 @@
 //go:build cgo && linux && amd64
 
 // Package cgoimage is the one kit call that tests need on the native kit and that
-// engine.Kit does not have: PLAN.md adds no image API before images work on the wasm
+// engine.Kit does not have: the binding adds no image API before images work on the wasm
 // engine. Only tests import it. It is not in a _test.go file, as those cannot use cgo.
 package cgoimage
 

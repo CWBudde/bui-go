@@ -230,7 +230,10 @@ so nothing in the API calls for MIT-SHM today.
 
 On 2026-11-07, at 40 s each, the engines showed no difference: `FuzzEvalNumber` 548k executions, `FuzzSetStr` 1.76M,
 `FuzzKeyInput` 217k (`go test -fuzz` in `internal/enginetest`, which needs cgo). `FuzzEvalNumber` accepts native failing where
-wasm succeeds, the case in "EvalNumber", so a real bug of that exact shape would pass. It compares numbers to 1e-9, relative.
+wasm succeeds only for text that can make an inf or nan, the case in "EvalNumber", so a parser bug in such text would pass. It
+compares numbers to 1e-9, relative. CI runs each target for 20 s, and `internal/enginetest/testdata/fuzz` holds a corpus.
+`FuzzKeyInput` skips input over 512 bytes: drawing 4 KB of text in one field took seconds, and a worker died in a stall like that.
+That stall's exact cause was not established.
 
 ## Images without threads
 
@@ -297,8 +300,8 @@ run passes `-ldflags='-s=false -w=false'`. The allocation tests skip under `-asa
 ### Failure paths
 
 `TestPanicAcrossCFramesExits` passes with `-tags bui_nocgo`, with panic and `Goexit`. `TestKitFatalPathsExit` covers traps, also
-from inside a handler. `internal/host/x11` covers a panic in a `Do` function in the loop, and a broken connection, which ends the
-process with status 1 as Xlib's default handler does.
+from inside a handler. `internal/host/x11` covers a panic in a `Do` function in the loop, and a broken connection, which closes every
+window and makes `Run` return `ErrDisplayLost`. On the native engine Xlib's default handler ends the process instead.
 
 ## The X11 host
 
@@ -315,7 +318,15 @@ process with status 1 as Xlib's default handler does.
 - **Text is always UTF-8.** The C host's `XLookupString` answers in the locale's encoding, and nothing calls `setlocale`, so typing
   `ä` natively gives a Latin-1 byte. That is a bug of the C path, not fixed here.
 - **A goroutine moves every event into an unbounded list.** xgb blocks when its queue of 500 events is full, and it reads replies
-  from the same socket, so a UI thread waiting for a reply with nobody reading events would hang forever.
+  from the same socket, so a UI thread waiting for a reply with nobody reading events would hang forever. Pointer motion replaces
+  its predecessor there, and a turn of the loop handles at most 256 events, so a flood leaves timers and renders their turn.
+- **XKB's event number is registered before the real connection opens.** xgb keeps its decoders in a process-wide map that every
+  connection's goroutine reads without a lock, and that goroutine starts inside `NewConn`. So a short-lived connection asks for the
+  number and is gone before the map changes. An xgb extension connecting later in the same process still writes that map at runtime,
+  which races with this host's reader. That is how xgb works, and no choice here avoids it.
+- **The clipboard refuses what takes INCR, both ways.** Owners send text past about 256 KiB in parts, and this host implements no
+  such transfer: a paste of one fails, and a copy that long is refused to whoever asks. xgb truncates an oversized request's length
+  field rather than failing, so sending it anyway would corrupt the stream of requests. The C host has no INCR either.
 - **Deliberate differences from the C host:** animation pacing is a due time rather than a sleep, so events and `Do` run meanwhile;
   a pending wake runs even when frames are due, which an animation starved in C; a layout change rereads the keymap; the pixel
   format is checked, and a depth other than 24 reports `ErrNoDisplay` where C would fail on `XPutImage`.
@@ -331,8 +342,12 @@ process with status 1 as Xlib's default handler does.
 - **Some tests are white-box.** No setter in `kit_core.c` reads its strings after emitting, and wazero reads parameters on entry and
   writes results on return, so a shared scratch buffer or stack changes no behaviour today. The tests inspect module memory and
   stack addresses instead, and guard the contract for a kit update that does.
-- **The worker-count, startup, stack and pending-image results have no regression test.** Only the size budget, the byte-identical rebuild and
-  the numbers `scripts/bench.sh` records can be checked again from this repository.
+- **Regression tests cover the stack peak and the pending image,** in `internal/engine/wasmengine`; the image test needs BUI's
+  tree in `third_party/` and skips without it, as in CI. `BenchmarkStartup` there records startup and worker counts, which nothing
+  asserts.
+- **The golden suite compares builds, and also pins.** Comparing two builds of one kit cannot see a bug they share, so
+  `TestGoldenPinned` holds the wasm engine to hashes in `internal/enginetest/testdata/pinned.sha256`. A new kit or module changes
+  them on purpose: check the drawing, then run `go test ./internal/enginetest/ -run TestGoldenPinned -update-pinned`.
 
 ## What has been run
 

@@ -41,7 +41,7 @@ BK_needs_render
 BK_set_scale
 BK_image_poll
 
-# no Go API calls this yet (PLAN.md, image decision). TestImageStaysPendingWithoutThreads
+# no Go API calls this yet (docs/design.md, images). TestImageStaysPendingWithoutThreads
 # does, as nothing else can start an image request.
 BK_node_set_image_source
 
