@@ -9,10 +9,14 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
 )
+
+// ErrDisplayLost is Host.Run's error when the connection to the window system breaks.
+var ErrDisplayLost = errors.New("bui: the connection to the display was lost")
 
 // Opaque references to kit objects, meaningful only to the engine that made them:
 // a C pointer natively, a linear-memory offset in a module. Zero is the null
@@ -177,8 +181,10 @@ type Host interface {
 	// Wake asks a running loop to call WakeInit's function. It is safe from any
 	// goroutine and never blocks.
 	Wake()
-	// Run runs the loop until Quit or until every window is closed.
-	Run()
+	// Run runs the loop until Quit or until every window is closed. It returns
+	// ErrDisplayLost if the window system goes away, on a host that survives that: under
+	// Xlib the process ends there.
+	Run() error
 	Quit()
 }
 

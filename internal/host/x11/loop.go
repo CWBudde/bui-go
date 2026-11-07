@@ -15,25 +15,35 @@ import (
 // framePeriod paces frames while something animates, as the C host's refresh_ms does.
 const framePeriod = time.Second / 60
 
+// maxEventsPerTurn bounds a turn's events, so that a flood of them leaves timers, renders
+// and wakes their turn.
+const maxEventsPerTurn = 256
+
 // Run implements engine.Host. As in the C host it erases an earlier Quit, and returns
 // right away with no window open.
-func (h *Host) Run() {
+func (h *Host) Run() error {
 	if h.c == nil {
-		return
+		return nil
 	}
 
 	h.quit = false
 
-	for h.open > 0 && !h.quit {
+	for h.open > 0 && !h.quit && !h.lost {
 		h.turn()
 	}
+
+	if h.lost {
+		return engine.ErrDisplayLost
+	}
+
+	return nil
 }
 
 // turn is one pass of the loop: wait, then events, timers and renders.
 func (h *Host) turn() {
 	h.wait()
 
-	for {
+	for range maxEventsPerTurn {
 		ev := h.events.pop()
 		if ev == nil {
 			break
@@ -43,6 +53,10 @@ func (h *Host) turn() {
 	}
 
 	h.checkConnection()
+
+	if h.lost {
+		return
+	}
 
 	now := time.Now()
 
@@ -171,12 +185,18 @@ func (h *Host) drainWake() {
 	returned = true
 }
 
-// checkConnection ends the process when the server is gone, as Xlib's default handler
-// does: nothing the host does can work any more.
+// checkConnection closes every window when the server is gone, so that Run can report it.
 func (h *Host) checkConnection() {
-	if h.events.isClosed() {
-		fmt.Fprintln(os.Stderr, "bui: the X connection is broken")
-		os.Exit(1)
+	if !h.events.isClosed() {
+		return
+	}
+
+	h.lost = true
+
+	for _, win := range h.windows {
+		if win.xid != 0 {
+			win.forget()
+		}
 	}
 }
 
@@ -192,6 +212,11 @@ func (h *Host) handle(ev xgb.Event) {
 	case xproto.ExposeEvent:
 		if win := h.findX(e.Window); win != nil && e.Count == 0 {
 			win.full, win.renderPending = true, true
+		}
+	case xproto.DestroyNotifyEvent:
+		if win := h.findX(e.Window); win != nil {
+			xproto.FreeGC(h.c, win.gc)
+			win.forget()
 		}
 	case xproto.ConfigureNotifyEvent:
 		if win := h.findX(e.Window); win != nil {

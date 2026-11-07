@@ -117,8 +117,7 @@ func (win *window) create(title string) bool {
 
 	const eventMask = xproto.EventMaskExposure | xproto.EventMaskStructureNotify |
 		xproto.EventMaskPointerMotion | xproto.EventMaskButtonPress | xproto.EventMaskButtonRelease |
-		xproto.EventMaskKeyPress | xproto.EventMaskKeyRelease | xproto.EventMaskLeaveWindow |
-		xproto.EventMaskFocusChange
+		xproto.EventMaskKeyPress | xproto.EventMaskKeyRelease | xproto.EventMaskLeaveWindow
 
 	err = xproto.CreateWindowChecked(c, rasterDepth, xid, h.root, 0, 0,
 		uint16(win.w), uint16(win.h), 0, //nolint:gosec // clampSize bounds them
@@ -213,7 +212,11 @@ func (win *window) close() {
 
 	xproto.FreeGC(win.host.c, win.gc)
 	xproto.DestroyWindow(win.host.c, win.xid)
+	win.forget()
+}
 
+// forget closes a window whose X window is already gone, as xkill leaves it.
+func (win *window) forget() {
 	win.xid = 0
 	win.host.open--
 }

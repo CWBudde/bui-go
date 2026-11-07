@@ -30,7 +30,7 @@ func (Host) WakeInit(func()) {}
 func (Host) Wake() {}
 
 // Run implements engine.Host.
-func (Host) Run() {}
+func (Host) Run() error { return nil }
 
 // Quit implements engine.Host.
 func (Host) Quit() {}

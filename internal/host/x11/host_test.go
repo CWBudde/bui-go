@@ -926,7 +926,7 @@ func TestClipboardIgnoresLateAnswers(t *testing.T) {
 			}
 			defer peer.Close()
 
-			done := peerAnswers(t, f, peer, []peerAnswer{{late, tc.first}, {100 * time.Millisecond, "neu"}})
+			done := peerAnswers(t, f, peer, []peerAnswer{{delay: late, text: tc.first}, {delay: 100 * time.Millisecond, text: "neu"}})
 
 			if got, ok := f.w.ClipboardGet(); ok {
 				t.Errorf("the first paste got %q before the owner answered", got)
@@ -946,6 +946,7 @@ func TestClipboardIgnoresLateAnswers(t *testing.T) {
 type peerAnswer struct {
 	delay time.Duration
 	text  string
+	incr  bool
 }
 
 // peerAnswers makes the peer own the clipboard and answer requests in order. The returned
@@ -994,7 +995,13 @@ func peerAnswers(t *testing.T, f *fixture, peer *xgb.Conn, answers []peerAnswer)
 				Time: rq.Time, Requestor: rq.Requestor, Selection: rq.Selection, Target: rq.Target, Property: xproto.AtomNone,
 			}
 
-			if answer.text != "" {
+			switch {
+			case answer.incr:
+				size := atomBytes(1 << 20)
+				xproto.ChangeProperty(peer, xproto.PropModeReplace, rq.Requestor, rq.Property, f.h.atoms.incr, 32, 1, size)
+
+				notify.Property = rq.Property
+			case answer.text != "":
 				xproto.ChangeProperty(peer, xproto.PropModeReplace, rq.Requestor, rq.Property, rq.Target, 8,
 					uint32(len(answer.text)), []byte(answer.text))
 
@@ -1130,7 +1137,9 @@ func TestRunEndsWhenTheLastWindowCloses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runWithTimeout(t, f.h)
+	if err := runWithTimeout(t, f.h); err != nil {
+		t.Errorf("Run = %v", err)
+	}
 
 	if f.w.xid != 0 {
 		t.Error("the window is still open")
@@ -1142,7 +1151,7 @@ func TestRunEndsWhenTheLastWindowCloses(t *testing.T) {
 }
 
 // runWithTimeout runs the loop, failing rather than hanging if it never returns.
-func runWithTimeout(t *testing.T, h *Host) {
+func runWithTimeout(t *testing.T, h *Host) error {
 	t.Helper()
 
 	timer := time.AfterFunc(5*time.Second, func() {
@@ -1152,7 +1161,7 @@ func runWithTimeout(t *testing.T, h *Host) {
 	})
 	defer timer.Stop()
 
-	h.Run()
+	return h.Run()
 }
 
 func TestRunWithOneOfTwoWindowsClosed(t *testing.T) {
@@ -1174,7 +1183,10 @@ func TestRunWithOneOfTwoWindowsClosed(t *testing.T) {
 		f.h.Quit()
 	})
 	f.h.Wake()
-	runWithTimeout(t, f.h)
+
+	if err := runWithTimeout(t, f.h); err != nil {
+		t.Errorf("Run = %v", err)
+	}
 
 	select {
 	case <-woke:
@@ -1200,7 +1212,9 @@ func TestWakeFromAnotherGoroutine(t *testing.T) {
 		f.h.Wake()
 	}()
 
-	runWithTimeout(t, f.h)
+	if err := runWithTimeout(t, f.h); err != nil {
+		t.Errorf("Run = %v", err)
+	}
 
 	if count == 0 {
 		t.Error("the wake function did not run")
@@ -1356,7 +1370,10 @@ func TestSupportedWithoutDisplay(t *testing.T) {
 		t.Errorf("WindowNew = %d", win)
 	}
 
-	h.Run()
+	if err := h.Run(); err != nil {
+		t.Errorf("Run = %v", err)
+	}
+
 	h.Quit()
 }
 
@@ -1376,27 +1393,8 @@ func TestChildProcess(t *testing.T) {
 		func() {
 			defer func() { _ = recover() }()
 
-			f.h.Run()
+			_ = f.h.Run()
 		}()
-	case "connection-lost":
-		f := newFixture(t, "button", 100, 40)
-		f.h.c.Close()
-		f.h.Run()
-	case "connection-lost-signal-consumed":
-		// Another waiter took the one signal, as a key release's peek can.
-		f := newFixture(t, "button", 100, 40)
-		f.settle()
-		f.h.events.close()
-		<-f.h.events.notify
-		f.h.Run()
-	case "connection-lost-behind-events":
-		// The events and the closing share one signal, and the closing only counts once
-		// the events are gone.
-		f := newFixture(t, "button", 100, 40)
-		f.settle()
-		f.h.events.push(xproto.ExposeEvent{Window: f.w.xid, Count: 1})
-		f.h.events.close()
-		f.h.Run()
 	}
 
 	t.Fatal("the process survived")
@@ -1408,9 +1406,6 @@ func TestFatalPathsExit(t *testing.T) {
 		code  int
 	}{
 		{"wake-panic", 2},
-		{"connection-lost", 1},
-		{"connection-lost-signal-consumed", 1},
-		{"connection-lost-behind-events", 1},
 	} {
 		t.Run(tc.child, func(t *testing.T) {
 			if _, err := xgb.NewConn(); err != nil {
@@ -1428,5 +1423,233 @@ func TestFatalPathsExit(t *testing.T) {
 				t.Fatalf("child: %v, want exit status %d\n%s", err, tc.code, out)
 			}
 		})
+	}
+}
+
+// Losing the server ends Run with an error, wherever in the queue the loss shows.
+func TestConnectionLostEndsRun(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		lose func(*fixture)
+	}{
+		{"closed", func(f *fixture) { f.h.c.Close() }},
+		{"signal consumed", func(f *fixture) {
+			// Another waiter took the one signal, as a key release's peek can.
+			f.settle()
+			f.h.events.close()
+			<-f.h.events.notify
+		}},
+		{"behind events", func(f *fixture) {
+			// The closing only counts once the events are gone.
+			f.settle()
+			f.h.events.push(xproto.ExposeEvent{Window: f.w.xid, Count: 1})
+			f.h.events.close()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, "button", 100, 40)
+			tc.lose(f)
+
+			if err := runWithTimeout(t, f.h); !errors.Is(err, engine.ErrDisplayLost) {
+				t.Errorf("Run = %v", err)
+			}
+
+			if f.h.open != 0 || f.w.xid != 0 {
+				t.Errorf("open = %d, xid = %d", f.h.open, f.w.xid)
+			}
+
+			if f.h.Supported() {
+				t.Error("Supported after the connection broke")
+			}
+
+			if win := f.h.WindowNew(f.ctx, "again", 10, 10); win != 0 {
+				t.Errorf("WindowNew = %d", win)
+			}
+		})
+	}
+}
+
+// xkill and the like destroy the window with no message: the loop must notice.
+func TestRunEndsWhenTheWindowIsDestroyed(t *testing.T) {
+	f := newFixture(t, "button", 200, 80)
+	f.show()
+
+	peer, err := xgb.NewConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+
+	if err := xproto.DestroyWindowChecked(peer, f.w.xid).Check(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runWithTimeout(t, f.h); err != nil {
+		t.Errorf("Run = %v", err)
+	}
+
+	if f.w.xid != 0 || f.h.open != 0 {
+		t.Errorf("xid = %d, open = %d", f.w.xid, f.h.open)
+	}
+}
+
+// Other extensions' numbers must stay as xgb has them: an embedder may use one.
+func TestOnlyXKBsEventIsClaimed(t *testing.T) {
+	newHost(t)
+
+	claimed := 0
+
+	for number, decode := range xgb.NewEventFuncs {
+		if _, ok := decode(make([]byte, 32)).(xkbEvent); ok {
+			claimed++
+
+			if number != xkbEventNumber {
+				t.Errorf("event %d decodes as XKB, whose number is %d", number, xkbEventNumber)
+			}
+		}
+	}
+
+	if claimed != 1 {
+		t.Errorf("%d event numbers decode as XKB", claimed)
+	}
+}
+
+// An owner sending in parts stores the size where the text would be, which is no text.
+func TestClipboardRefusesIncr(t *testing.T) {
+	f := newFixture(t, "text", 300, 40)
+	f.show()
+
+	peer, err := xgb.NewConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+
+	done := peerAnswers(t, f, peer, []peerAnswer{{incr: true}})
+
+	if got, ok := f.w.ClipboardGet(); ok {
+		t.Errorf("paste got %d bytes", len(got))
+	}
+
+	<-done
+}
+
+// Text that fits one request goes out whole. Longer text is refused, and must not corrupt
+// the stream of requests, which is what xgb's truncated length field would do.
+func TestClipboardServesOnlyWhatFitsARequest(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		extra int
+		want  bool
+	}{
+		{"fits", 0, true},
+		{"too long", 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, "text", 300, 40)
+			f.show()
+
+			peer, err := xgb.NewConn()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer peer.Close()
+
+			xid, err := xproto.NewWindowId(peer)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			screen := xproto.Setup(peer).DefaultScreen(peer)
+
+			if err := xproto.CreateWindowChecked(peer, screen.RootDepth, xid, screen.Root, 0, 0, 1, 1, 0,
+				xproto.WindowClassInputOutput, screen.RootVisual, 0, nil).Check(); err != nil {
+				t.Fatal(err)
+			}
+
+			f.h.clip, f.h.hasClip = strings.Repeat("x", f.h.maxData+tc.extra), true
+			f.h.handleSelectionRequest(xproto.SelectionRequestEvent{
+				Requestor: xid, Selection: f.h.atoms.clipboard, Target: f.h.atoms.utf8, Property: f.h.atoms.selections[0],
+			})
+
+			ev, xerr := peer.WaitForEvent()
+			if xerr != nil {
+				t.Fatal(xerr)
+			}
+
+			sn, ok := ev.(xproto.SelectionNotifyEvent)
+			if !ok {
+				t.Fatalf("got %v", ev)
+			}
+
+			if got := sn.Property != xproto.AtomNone; got != tc.want {
+				t.Errorf("served = %v", got)
+			}
+
+			if _, err := xproto.GetInputFocus(f.h.c).Reply(); err != nil {
+				t.Errorf("the connection did not survive: %v", err)
+			}
+
+			f.settle()
+
+			if f.h.events.isClosed() || f.h.events.errors != 0 {
+				t.Errorf("closed = %v, %d X errors", f.h.events.isClosed(), f.h.events.errors)
+			}
+		})
+	}
+}
+
+func motion(win xproto.Window, state uint16, x int16) xproto.MotionNotifyEvent {
+	return xproto.MotionNotifyEvent{Event: win, State: state, EventX: x}
+}
+
+func TestMotionReplacesOnlyItsOwnKind(t *testing.T) {
+	q := &eventQueue{notify: make(chan struct{}, 1)}
+
+	for _, ev := range []xgb.Event{
+		motion(1, 0, 1), motion(1, 0, 2), // the second replaces the first
+		motion(2, 0, 3),               // another window
+		motion(2, 256, 4),             // a button went down
+		xproto.ExposeEvent{Window: 2}, // order against others stays
+		motion(2, 256, 5), motion(2, 256, 6),
+	} {
+		q.push(ev)
+	}
+
+	want := []xgb.Event{
+		motion(1, 0, 2), motion(2, 0, 3), motion(2, 256, 4), xproto.ExposeEvent{Window: 2}, motion(2, 256, 6),
+	}
+
+	for i, w := range want {
+		if got := q.pop(); got != w {
+			t.Errorf("event %d: %v, want %v", i, got, w)
+		}
+	}
+
+	if q.pop() != nil || q.events != nil {
+		t.Errorf("after draining: %v", q.events)
+	}
+}
+
+// A flood must leave a turn time for what comes after events.
+func TestTurnBoundsItsEvents(t *testing.T) {
+	f := newFixture(t, "button", 100, 40)
+	f.show()
+	f.settle()
+
+	const extra = 10
+
+	for range maxEventsPerTurn + extra {
+		f.h.events.push(xproto.ExposeEvent{Window: f.w.xid, Count: 1})
+	}
+
+	f.h.turn()
+
+	f.h.events.mu.Lock()
+	left := len(f.h.events.events)
+	f.h.events.mu.Unlock()
+
+	if left != extra {
+		t.Errorf("%d events left, want %d", left, extra)
 	}
 }

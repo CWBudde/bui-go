@@ -194,6 +194,31 @@ func TestXKBReplyTruncated(t *testing.T) {
 	}
 }
 
+// A field that lies is an error or a map that works, and never a panic later.
+func TestXKBReplyLies(t *testing.T) {
+	reply := xkbReply(t)
+
+	states := []uint16{0, modControl, modLock, 1 << 13, 2 << 13, 3 << 13, modControl | 1<<13, modControl | 3<<13}
+
+	for i := range reply {
+		for _, value := range []byte{0x05, 0x0f, 0xff} {
+			lie := slices.Clone(reply)
+			lie[i] = value
+
+			m, err := parseXKBMap(lie)
+			if err != nil {
+				continue
+			}
+
+			for code := range 256 {
+				for _, state := range states {
+					m.lookup(byte(code), state)
+				}
+			}
+		}
+	}
+}
+
 func TestKeysymTableIsSorted(t *testing.T) {
 	for i := 1; i < len(keysymInfo); i++ {
 		if keysymInfo[i-1].sym >= keysymInfo[i].sym {

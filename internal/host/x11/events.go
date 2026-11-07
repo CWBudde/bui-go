@@ -15,7 +15,9 @@ import (
 // eventQueue holds X events until the loop asks for them, in a list with no limit. xgb
 // reads replies and events from one socket, and blocks once its own queue of 500 events
 // is full, so a UI thread waiting for a reply, with nobody reading events, would wait
-// forever. Taking every event right away rules that out.
+// forever. Taking every event right away rules that out. What keeps the list short is
+// that pointer motion, the one event a user can send by the thousand, replaces its
+// predecessor.
 type eventQueue struct {
 	mu     sync.Mutex
 	events []xgb.Event
@@ -58,9 +60,28 @@ func newEventQueue(c *xgb.Conn) *eventQueue {
 
 func (q *eventQueue) push(ev xgb.Event) {
 	q.mu.Lock()
-	q.events = append(q.events, ev)
+
+	if n := len(q.events); n > 0 && replacesMotion(q.events[n-1], ev) {
+		q.events[n-1] = ev
+	} else {
+		q.events = append(q.events, ev)
+	}
+
 	q.mu.Unlock()
 	q.signal()
+}
+
+// replacesMotion reports whether next makes last pointless: the same window, and the same
+// buttons and modifiers, whose changes a widget might care about, at a newer position.
+func replacesMotion(last, next xgb.Event) bool {
+	a, ok := last.(xproto.MotionNotifyEvent)
+	if !ok {
+		return false
+	}
+
+	b, ok := next.(xproto.MotionNotifyEvent)
+
+	return ok && a.Event == b.Event && a.State == b.State
 }
 
 func (q *eventQueue) close() {
@@ -89,6 +110,11 @@ func (q *eventQueue) pop() xgb.Event {
 	ev := q.events[0]
 	q.events[0] = nil
 	q.events = q.events[1:]
+
+	// Let a burst's array go, as nothing else would until the next growth.
+	if len(q.events) == 0 {
+		q.events = nil
+	}
 
 	return ev
 }

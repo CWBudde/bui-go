@@ -51,7 +51,11 @@ func TestHostHasNoWindowsAndNeverLoadsTheModule(t *testing.T) {
 	h.WindowFree(0)
 	h.WakeInit(func() { t.Error("the wake function ran") })
 	h.Wake()
-	h.Run()
+
+	if err := h.Run(); err != nil {
+		t.Errorf("Run = %v", err)
+	}
+
 	h.Quit()
 
 	// Wake is the call the seam allows from any goroutine, and Quit is what bui

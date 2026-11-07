@@ -66,9 +66,17 @@ func (win *window) paste() (string, bool) {
 	return win.readSelection(property)
 }
 
-// readSelection takes the text the clipboard's owner stored on this window.
+// readSelection takes the text the clipboard's owner stored on this window. It refuses text
+// it cannot have whole: too long, or sent in parts with INCR, as owners do past about
+// 256 KiB. What INCR stores is the size, not the text, and deleting the property is what
+// starts the transfer, so that property stays.
 func (win *window) readSelection(property xproto.Atom) (string, bool) {
 	const maxClipboardLongs = 1 << 24
+
+	head, err := xproto.GetProperty(win.host.c, false, win.xid, property, xproto.GetPropertyTypeAny, 0, 0).Reply()
+	if err != nil || head == nil || head.Type == win.host.atoms.incr || head.BytesAfter > 4*maxClipboardLongs {
+		return "", false
+	}
 
 	prop, err := xproto.GetProperty(win.host.c, true, win.xid, property, xproto.GetPropertyTypeAny,
 		0, maxClipboardLongs).Reply()
@@ -112,7 +120,9 @@ func (h *Host) handleSelectionRequest(rq xproto.SelectionRequestEvent) {
 			uint32(len(data)/4), data) //nolint:gosec // three atoms
 
 		reply.Property = rq.Property
-	case (rq.Target == h.atoms.utf8 || rq.Target == xproto.AtomString) && h.hasClip:
+	// Past one request it would take INCR. xgb truncates a request's length field rather than
+	// failing, which would make the server read the rest as requests, so this refuses.
+	case (rq.Target == h.atoms.utf8 || rq.Target == xproto.AtomString) && h.hasClip && len(h.clip) <= h.maxData:
 		xproto.ChangeProperty(h.c, xproto.PropModeReplace, rq.Requestor, rq.Property, rq.Target, 8,
 			uint32(len(h.clip)), []byte(h.clip)) //nolint:gosec // far below 4 GiB
 

@@ -5,8 +5,11 @@
 // Engines: on Linux amd64 with cgo it calls the kit natively. Everywhere else, and with
 // the build tag bui_nocgo, it runs the kit as an embedded WebAssembly module with no cgo:
 // with a real window on Linux through X11, and headless on other systems, where NewWindow
-// and Run report ErrNoDisplay. The API and the pixels are the same. A binary with the
-// wasm engine is distributed under GPLv3. The README has the limits of each engine.
+// and Run report ErrNoDisplay. The API is the same, and the tests hold both engines to the
+// same pixels. Text typed on a real window can differ: the wasm engine's X11 host always
+// delivers UTF-8, while the native one gets non-ASCII keys in the C locale's encoding, as
+// nothing sets the locale. A binary with the wasm engine is distributed under GPLv3. The
+// README has the limits of each engine.
 //
 // Threading: Run must be called from the main goroutine, and all kit-touching
 // API is UI-thread only, meaning the main goroutine before and after Run, and
@@ -19,6 +22,8 @@ import (
 	"errors"
 	"runtime"
 	"sync"
+
+	"github.com/CWBudde/bui-go/internal/engine"
 )
 
 // init runs on the main goroutine; this keeps it on the main OS thread.
@@ -84,6 +89,11 @@ func EvalNumber(expr string) (float64, bool) {
 // ErrNoDisplay is returned when the kit cannot open a window system.
 var ErrNoDisplay = errors.New("bui: no display available")
 
+// ErrDisplayLost is returned by Run when the connection to the window system breaks. Every
+// window is closed by then, and later calls to Run and NewWindow report ErrNoDisplay. On
+// the native engine Xlib ends the process instead, with no chance to return this.
+var ErrDisplayLost = engine.ErrDisplayLost
+
 // Supported reports whether windows can be opened. It opens the display. It is
 // UI-thread only.
 func Supported() bool {
@@ -95,7 +105,8 @@ var inRun, inLoop, quitRequested bool
 
 // Run runs the message loop until Quit or until every window is closed. It must
 // be called from the main goroutine. It returns ErrNoDisplay without a window
-// system, leaving queued Do functions in place.
+// system, leaving queued Do functions in place, and ErrDisplayLost if the window
+// system goes away during the loop.
 //
 // A panic in a handler, or in a Do function running inside the loop, ends the
 // process, as it would abandon C frames. A Do function that Run itself drains
@@ -111,7 +122,7 @@ func Run() error {
 	}
 
 	inRun = true
-	defer func() { inRun, inLoop = false, false }()
+	defer func() { inRun, inLoop, quitRequested = false, false, false }()
 	// Wakes sent before this were lost, so what they announced runs right here.
 	doMu.Lock()
 	host.WakeInit(handleWake)
@@ -119,10 +130,12 @@ func Run() error {
 	runDeferred()
 	drainDo()
 
+	var err error
+
 	if !quitRequested {
 		inLoop = true
 
-		host.Run()
+		err = host.Run()
 
 		inLoop = false
 	}
@@ -132,9 +145,7 @@ func Run() error {
 	runDeferred()
 	drainDo()
 
-	quitRequested = false
-
-	return nil
+	return err //nolint:wrapcheck // the exported ErrDisplayLost, as it is
 }
 
 // Quit ends the message loop. Outside the loop it makes the next Run return

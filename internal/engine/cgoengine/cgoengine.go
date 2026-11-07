@@ -364,7 +364,11 @@ func (Host) WakeInit(f func()) {
 func (Host) Wake() { C.BK_window_wake() }
 
 // Run implements engine.Host.
-func (Host) Run() { C.BK_window_run() }
+func (Host) Run() error {
+	C.BK_window_run()
+
+	return nil
+}
 
 // Quit implements engine.Host.
 func (Host) Quit() { C.BK_window_quit() }

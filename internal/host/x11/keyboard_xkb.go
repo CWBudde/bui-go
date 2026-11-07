@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
@@ -57,15 +58,51 @@ func (e xkbEvent) Bytes() []byte { return e.raw }
 // String implements xgb.Event.
 func (e xkbEvent) String() string { return fmt.Sprintf("xkbEvent%v", e.raw) }
 
-// init registers xkbEvent for every extension event number, as XKB's depends on the
-// server. xgb's own extensions write this global map when they connect, which races with
-// the reading goroutine of any connection already open. Here it happens before there is
-// one, and XKB is the only extension whose events the host selects.
-func init() {
-	const firstExtensionEvent, lastEvent = 64, 127
+// dial connects to the server after making XKB's events decodable. xgb reads a process-wide
+// map of decoders on every connection's goroutine, without a lock, and that goroutine starts
+// inside NewConn, so a decoder for an event number the server decides has to go in first.
+// Asking takes a connection, so a short-lived one asks and is gone before the map changes.
+func dial() (*xgb.Conn, error) {
+	probe, err := xgb.NewConn()
+	if err != nil {
+		return nil, err //nolint:wrapcheck // the caller only needs to know it failed
+	}
 
-	for n := firstExtensionEvent; n <= lastEvent; n++ {
-		xgb.NewEventFuncs[n] = func(raw []byte) xgb.Event { return xkbEvent{raw: raw} }
+	const name = "XKEYBOARD"
+
+	ext, err := xproto.QueryExtension(probe, uint16(len(name)), name).Reply()
+
+	probe.Close()
+
+	// Its reading goroutine ends by closing this, after which nothing reads the map for it.
+	for {
+		if ev, xerr := probe.WaitForEvent(); ev == nil && xerr == nil {
+			break
+		}
+	}
+
+	if err == nil && ext.Present {
+		registerXKBEvent(int(ext.FirstEvent))
+	}
+
+	return xgb.NewConn() //nolint:wrapcheck // as above
+}
+
+var (
+	xkbEventMu     sync.Mutex
+	xkbEventNumber int
+)
+
+// registerXKBEvent writes the map at most once for a server. All of XKB's events share one
+// number, with their kind in the next byte. A later host on a server that numbers it
+// differently would race with an open connection, as any xgb extension connecting does.
+func registerXKBEvent(number int) {
+	xkbEventMu.Lock()
+	defer xkbEventMu.Unlock()
+
+	if xkbEventNumber != number {
+		xkbEventNumber = number
+		xgb.NewEventFuncs[number] = func(raw []byte) xgb.Event { return xkbEvent{raw: raw} }
 	}
 }
 
@@ -184,8 +221,9 @@ func fetchXKBMap(c *xgb.Conn, opcode byte) (*xkbMap, error) {
 	return parseXKBMap(reply)
 }
 
-// parseXKBMap reads GetMap's reply. It trusts nothing about the lengths, as a slice
-// bound failing here would take the whole program down over a keymap.
+// parseXKBMap reads GetMap's reply. It trusts nothing about the lengths or the group
+// counts, as a bound failing here or in lookup would take the whole program down over a
+// keymap.
 func parseXKBMap(reply []byte) (*xkbMap, error) {
 	if len(reply) < xkbReplyHeader {
 		return nil, errXKBReply
@@ -253,6 +291,11 @@ func (r *xkbReader) keyType() xkbType {
 func (r *xkbReader) key() xkbKey {
 	b := r.take(xkbSymMapSize)
 	k := xkbKey{groupInfo: b[4], width: int(b[5])}
+
+	// The count is a nibble, and types holds what XKB allows.
+	if k.groupInfo&xkbGroupCountMask > xkbMaxGroups {
+		r.failed = true
+	}
 
 	for i := range k.types {
 		k.types[i] = int(b[i])

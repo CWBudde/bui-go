@@ -69,6 +69,8 @@ type Host struct {
 	wake     chan struct{}
 	wakeFunc func()
 	quit     bool
+	// lost says the connection broke. Nothing the host does can work any more.
+	lost bool
 
 	// frameDue paces animation: nothing renders before it. See renderPending.
 	frameDue time.Time
@@ -81,7 +83,7 @@ var _ engine.Host = (*Host)(nil)
 
 // atoms are the interned names the host needs, once connected.
 type atoms struct {
-	delete, protocols, clipboard, utf8, targets, netWMName xproto.Atom
+	delete, protocols, clipboard, utf8, targets, incr, netWMName xproto.Atom
 
 	// selections are the properties pastes take turns with. The server never frees an
 	// atom, so these are few rather than one per paste.
@@ -103,11 +105,15 @@ func New(kit engine.Kit) *Host {
 
 // Supported implements engine.Host.
 func (h *Host) Supported() bool {
+	if h.lost {
+		return false
+	}
+
 	if h.c != nil {
 		return true
 	}
 
-	c, err := xgb.NewConn()
+	c, err := dial()
 	if err != nil {
 		return false
 	}
@@ -212,6 +218,7 @@ func internAtoms(c *xgb.Conn) (atoms, error) {
 		{"CLIPBOARD", &a.clipboard},
 		{"UTF8_STRING", &a.utf8},
 		{"TARGETS", &a.targets},
+		{"INCR", &a.incr},
 		{"BUI_SELECTION_0", &a.selections[0]},
 		{"BUI_SELECTION_1", &a.selections[1]},
 		{"BUI_SELECTION_2", &a.selections[2]},
