@@ -94,7 +94,7 @@ The window draws correctly, and Christian counted 1.6x as close on 2026-11-07, a
 - [x] `internal/host/cocoa` implementing `engine.Host`, with `host_darwin.go` and `host_none.go` narrowed to the remaining platforms.
       (2026-11-07) — the spike had done it; the package comment no longer calls it a spike. All six targets cross-build without cgo.
 - [x] Mouse, scroll, keyboard and text input, resize, close, `Do` wakes and the clipboard, tested in the same areas as the X11 host.
-      (2026-11-07) — ported from the C view, with cursors and `Warp`. 362 passes and no failures on the MacBook, with and without cgo,
+      (2026-11-07) — ported from the C view, with cursors and `Warp`. 363 passes and no failures on the MacBook, with and without cgo,
       on Go 1.27.1 and 1.26.8, and each of 45 handler breaks fails its test. The input is synthetic: keys skip `NSApp`, and the real
       clipboard, a real warp and `pressedMouseButtons` aren't reached.
 - [ ] From the spike: live resize (AppKit's nested loop), scale changes between screens, activation, a real click on the close button,
