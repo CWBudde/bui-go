@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CWBudde/bui-go/internal/engine"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -565,6 +566,11 @@ func TestEmitReachesTheReceiver(t *testing.T) {
 	}
 }
 
+// panickingHost panics in the one call a property change makes.
+type panickingHost struct{ engine.WindowHost }
+
+func (panickingHost) Request() { panic("boom") }
+
 const childEnv = "BUI_WASMENGINE_TEST_CHILD"
 
 // TestChildProcess does what ends the process when another test asks for it.
@@ -580,8 +586,16 @@ func TestChildProcess(t *testing.T) {
 			defer func() { _ = recover() }()
 
 			m := &module{emit: func(uint32, int, float64) { panic("boom") }}
-			m.hostEmit(context.Background(), nil, []uint64{1, 0, 0})
+			guarded(m.hostEmit)(context.Background(), nil, []uint64{1, 0, 0})
 		}()
+	case "window-host-panic":
+		// Through the real module, as wazero recovers around every host function.
+		k := Kit{m: mustLoad(kitModule, options{memoryLimitPages: memoryLimitPages})}
+		root := k.NodeNew("frame")
+		ctx := k.ContextNew(root)
+		k.ContextSetWindowHost(ctx, panickingHost{})
+		k.SetStr(root, "description", "any change requests a render")
+		k.SetNum(root, "padding", 3)
 	case "bad-module":
 		_ = mustLoad([]byte("not wasm"), options{memoryLimitPages: memoryLimitPages})
 	}
@@ -589,10 +603,10 @@ func TestChildProcess(t *testing.T) {
 	t.Fatal("the process survived")
 }
 
-// Both end the process: a recover further up, or wazero's own recover around host
+// They end the process: a recover further up, or wazero's own recover around host
 // functions, must not let it carry on.
 func TestFatalPathsExit(t *testing.T) {
-	for _, child := range []string{"emit-panic", "bad-module"} {
+	for _, child := range []string{"emit-panic", "window-host-panic", "bad-module"} {
 		t.Run(child, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], "-test.run=^TestChildProcess$", "-test.count=1")
 

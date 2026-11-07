@@ -203,6 +203,10 @@ func TestKitConstantsMatchTheHeader(t *testing.T) {
 		{"BK_GEOM_PACK", bkGeomPack},
 		{"BK_EV_CHANGE", engine.EvChange},
 		{"BK_EV_CLICK", engine.EvClick},
+		{"BK_SHIFT", engine.ModShift},
+		{"BK_CTRL", engine.ModCtrl},
+		{"BK_ALT", engine.ModAlt},
+		{"BK_BUTTON1", engine.ModButton1},
 	} {
 		if want := enumValue(t, string(b), tc.name); tc.got != want {
 			t.Errorf("%s = %d, the header says %d", tc.name, tc.got, want)

@@ -62,6 +62,8 @@ type goldenStage struct {
 	name  string
 	act   func(*goldenRun)
 	check func(r *goldenRun, before, after []uint32)
+	// damageOnly draws through RenderDamage, as a window does, not a full render.
+	damageOnly bool
 }
 
 // goldenRun is one case on one kit.
@@ -108,7 +110,15 @@ func runCase(t *testing.T, k engine.Kit, c goldenCase) [][]uint32 {
 			st.act(r)
 		}
 
-		px := r.s.render()
+		var px []uint32
+
+		if st.damageOnly {
+			k.RenderDamage(r.s.ctx, r.s.r, c.w, c.h, false)
+			px = r.s.pixels()
+		} else {
+			px = r.s.render()
+		}
+
 		if st.check != nil {
 			st.check(r, before, px)
 		}
@@ -151,6 +161,7 @@ func goldenCases() []goldenCase {
 		goldenText(),
 		goldenMenu(),
 		goldenScroll(),
+		goldenInput(),
 		goldenClick(),
 		goldenDense(),
 	}
@@ -444,6 +455,94 @@ func goldenScroll() goldenCase {
 					if v := r.k.GetNum(r.nodes["scroll"], keyScroll); v >= 1<<20 || v <= scrollBy {
 						r.t.Errorf("scroll position %v, want it clamped to the end", v)
 					}
+				},
+			},
+		},
+	}
+}
+
+// goldenInput walks a window's input paths, drawing only damage, so that hover, drag,
+// wheel, typing and the context menu all have to leave the same pixels.
+func goldenInput() goldenCase { //nolint:funlen // a list of stages
+	center := func(r *goldenRun, name string) (x, y int) {
+		r.t.Helper()
+
+		return r.s.center(r.nodes[name])
+	}
+
+	changed := func(what string) func(*goldenRun, []uint32, []uint32) {
+		return requireChanged(what, "", 20)
+	}
+
+	return goldenCase{
+		name: "input", w: 400, h: 300,
+		build: func(r *goldenRun) {
+			root := r.nodes["root"]
+			r.num(root, "padding", 8)
+
+			button := r.named("button", typeButton)
+			r.str(button, keyText, "Hover me")
+			r.str(button, "description", "A tooltip")
+			r.packIn(root, button, pack{fill: fillX})
+
+			slider := r.named("slider", typeSlider)
+			r.num(slider, "min", 0)
+			r.num(slider, "max", 100)
+			r.num(slider, keyValue, 20)
+			r.packIn(root, slider, pack{fill: fillX, padY0: 6})
+
+			text := r.named("text", typeText)
+			r.str(text, keyText, "abc")
+			r.packIn(root, text, pack{fill: fillX, padY0: 6})
+		},
+		stages: []goldenStage{
+			{name: stageDrawn},
+			{
+				name: "hover", damageOnly: true, check: changed("hovering"),
+				act: func(r *goldenRun) {
+					x, y := center(r, "button")
+					r.k.Motion(r.s.ctx, x, y, 0)
+				},
+			},
+			{
+				name: "slider-drag", damageOnly: true, check: changed("dragging"),
+				act: func(r *goldenRun) {
+					x, y := center(r, "slider")
+					r.k.Motion(r.s.ctx, x, y, 0)
+					r.k.PressMods(r.s.ctx, x, y, engine.ModButton1)
+					r.k.Motion(r.s.ctx, x+40, y, engine.ModButton1)
+					r.k.ReleaseMods(r.s.ctx, x+40, y, 0)
+				},
+			},
+			{
+				name: "wheel", damageOnly: true, check: changed("the wheel"),
+				act: func(r *goldenRun) {
+					x, y := center(r, "slider")
+					r.k.Motion(r.s.ctx, x, y, 0)
+					r.k.Wheel(r.s.ctx, x, y, 1, engine.ModCtrl)
+					r.k.Scroll(r.s.ctx, x, y, 0, 1, engine.ModCtrl)
+				},
+			},
+			{
+				name: "typing", damageOnly: true, check: changed("typing"),
+				act: func(r *goldenRun) {
+					x, y := center(r, "text")
+					r.k.Motion(r.s.ctx, x, y, 0)
+					r.k.PressMods(r.s.ctx, x, y, engine.ModButton1)
+					r.k.ReleaseMods(r.s.ctx, x, y, 0)
+					r.k.Key(r.s.ctx, "ä", "adiaeresis", 0)
+					r.k.Key(r.s.ctx, "€", "EuroSign", 0)
+				},
+			},
+			{
+				name: "committed", damageOnly: true, check: changed("committing"),
+				act: func(r *goldenRun) { r.k.Key(r.s.ctx, "", "Return", 0) },
+			},
+			{
+				name: "context-menu", damageOnly: true, check: changed("the context menu"),
+				act: func(r *goldenRun) {
+					x, y := center(r, "text")
+					r.k.ContextMenu(r.s.ctx, x, y, 0)
 				},
 			},
 		},

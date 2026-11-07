@@ -25,6 +25,8 @@ func Conformance(t *testing.T, k engine.Kit) {
 		{"Geometry", testGeometry},
 		{"Rendering", testRendering},
 		{"Events", testEvents},
+		{"Input", testInput},
+		{"WindowHost", testWindowHost},
 		{"ReentryDuringEmit", testReentry},
 		{"NegativeCoordinates", testNegativeCoordinates},
 		{"EvalNumber", testEvalNumber},

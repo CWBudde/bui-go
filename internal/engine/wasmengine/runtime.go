@@ -67,6 +67,8 @@ type module struct {
 	cache   wazero.CompilationCache
 	mod     api.Module
 	emit    engine.EmitFunc
+	// windowHosts holds each context's window host.
+	windowHosts map[engine.Context]engine.WindowHost
 
 	// levels and depth are the export calls in progress: see level.
 	levels []*level
@@ -143,6 +145,8 @@ func instantiate(ctx context.Context, bin []byte, o options, cache wazero.Compil
 		ctx:     ctx,
 		runtime: wazero.NewRuntimeWithConfig(ctx, runtimeConfig(o, cache)),
 		cache:   cache,
+
+		windowHosts: map[engine.Context]engine.WindowHost{},
 	}
 
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, m.runtime); err != nil {
@@ -151,13 +155,7 @@ func instantiate(ctx context.Context, bin []byte, o options, cache wazero.Compil
 		return nil, fmt.Errorf("wasi: %w", err)
 	}
 
-	_, err := m.runtime.NewHostModuleBuilder("bui").
-		NewFunctionBuilder().
-		WithGoModuleFunction(api.GoModuleFunc(m.hostEmit),
-			[]api.ValueType{api.ValueTypeI32, api.ValueTypeI32, api.ValueTypeF64}, nil).
-		WithParameterNames("id", "kind", "a").
-		Export("emit").
-		Instantiate(ctx)
+	_, err := m.hostModule().Instantiate(ctx)
 	if err != nil {
 		_ = m.runtime.Close(ctx)
 
@@ -206,18 +204,104 @@ func moduleConfig() wazero.ModuleConfig {
 		WithRandSource(rand.Reader)
 }
 
-// hostEmit is the shim's bui.emit import. wazero recovers a panic in a host
-// function and returns it from the export call, so the guard has to be here.
+// hostModule is the shim's imports. wazero recovers a panic in a host function and
+// returns it from the export call, so each has the guard: see guarded.
+func (m *module) hostModule() wazero.HostModuleBuilder {
+	i32s := func(n int) []api.ValueType {
+		types := make([]api.ValueType, n)
+		for i := range types {
+			types[i] = api.ValueTypeI32
+		}
+
+		return types
+	}
+
+	b := m.runtime.NewHostModuleBuilder("bui")
+	add := func(name string, f api.GoModuleFunc, params, results []api.ValueType) {
+		b.NewFunctionBuilder().WithGoModuleFunction(guarded(f), params, results).Export(name)
+	}
+
+	add("emit", m.hostEmit, []api.ValueType{api.ValueTypeI32, api.ValueTypeI32, api.ValueTypeF64}, nil)
+	add("host_request", m.hostRequest, i32s(1), nil)
+	add("host_set_cursor", m.hostSetCursor, i32s(2), nil)
+	add("host_warp", m.hostWarp, i32s(3), nil)
+	add("host_clipboard_get", m.hostClipboardGet, i32s(1), i32s(1))
+	add("host_clipboard_set", m.hostClipboardSet, i32s(2), nil)
+	add("host_schedule", m.hostSchedule, i32s(3), nil)
+
+	return b
+}
+
+// guarded ends the process on a panic or Goexit in f: see engine.ExitIfUnwinding.
+func guarded(f api.GoModuleFunc) api.GoModuleFunc {
+	return func(ctx context.Context, mod api.Module, stack []uint64) {
+		returned := false
+
+		defer engine.ExitIfUnwinding(&returned)
+
+		f(ctx, mod, stack)
+
+		returned = true
+	}
+}
+
+// hostEmit is the shim's bui.emit import.
 func (m *module) hostEmit(_ context.Context, _ api.Module, stack []uint64) {
-	returned := false
-
-	defer engine.ExitIfUnwinding(&returned)
-
 	if m.emit != nil {
 		m.emit(api.DecodeU32(stack[0]), int(api.DecodeI32(stack[1])), api.DecodeF64(stack[2]))
 	}
+}
 
-	returned = true
+// windowHost finds the host of the context in stack[0]. The shim installs the
+// trampolines only together with an entry, so a missing one is a bug in this package.
+func (m *module) windowHost(stack []uint64) engine.WindowHost {
+	ctx := engine.Context(api.DecodeU32(stack[0]))
+
+	h, ok := m.windowHosts[ctx]
+	if !ok {
+		fatalf("wasm kit called the window host of context %#x, which has none", ctx)
+	}
+
+	return h
+}
+
+func (m *module) hostRequest(_ context.Context, _ api.Module, stack []uint64) {
+	m.windowHost(stack).Request()
+}
+
+func (m *module) hostSetCursor(_ context.Context, _ api.Module, stack []uint64) {
+	m.windowHost(stack).SetCursor(int(api.DecodeI32(stack[1])))
+}
+
+func (m *module) hostWarp(_ context.Context, _ api.Module, stack []uint64) {
+	m.windowHost(stack).Warp(int(api.DecodeI32(stack[1])), int(api.DecodeI32(stack[2])))
+}
+
+// hostClipboardGet returns a string from the module's malloc, which the kit frees,
+// or NULL. The export calls nest like any other inside a call in progress.
+func (m *module) hostClipboardGet(_ context.Context, _ api.Module, stack []uint64) {
+	text, ok := m.windowHost(stack).ClipboardGet()
+	stack[0] = api.EncodeU32(0)
+
+	if !ok {
+		return
+	}
+
+	p := api.DecodeU32(m.call("malloc", strSize(text)))
+	if p == 0 {
+		return
+	}
+
+	m.putStr(p, text)
+	stack[0] = api.EncodeU32(p)
+}
+
+func (m *module) hostClipboardSet(_ context.Context, _ api.Module, stack []uint64) {
+	m.windowHost(stack).ClipboardSet(m.goStr(api.DecodeU32(stack[1])))
+}
+
+func (m *module) hostSchedule(_ context.Context, _ api.Module, stack []uint64) {
+	m.windowHost(stack).Schedule(int(api.DecodeI32(stack[1])), int(api.DecodeI32(stack[2])))
 }
 
 // close releases the module. Only tests load more than one.

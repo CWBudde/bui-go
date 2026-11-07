@@ -14,5 +14,8 @@ uint32_t bui_node_id(const BKNode *node);
  * host it finds and forwards only emit. */
 void bui_context_set_emit_host(BKContext *ctx);
 
+/* Installs a host that forwards to Go's window host of ctx as well as emit. */
+void bui_context_set_window_host(BKContext *ctx);
+
 /* BK_window_wake_init with the Go wake callback. */
 void bui_wake_init(void);

@@ -52,6 +52,60 @@ SHIM_EXPORT("bui_context_set_emit_host") void bui_context_set_emit_host(BKContex
   BK_context_set_host(ctx, &host);
 }
 
+/* -- the window host --------------------------------------------------------
+ * BKHost holds function pointers, so these trampolines turn each call into a
+ * wazero import. `data` is the context, which is how Go finds its window. */
+SHIM_IMPORT("host_request") void bui_go_host_request(uint32_t ctx);
+SHIM_IMPORT("host_set_cursor") void bui_go_host_set_cursor(uint32_t ctx, int32_t cursor);
+SHIM_IMPORT("host_warp") void bui_go_host_warp(uint32_t ctx, int32_t x, int32_t y);
+SHIM_IMPORT("host_clipboard_get") uint32_t bui_go_host_clipboard_get(uint32_t ctx);
+SHIM_IMPORT("host_clipboard_set") void bui_go_host_clipboard_set(uint32_t ctx, uint32_t text);
+SHIM_IMPORT("host_schedule") void bui_go_host_schedule(uint32_t ctx, int32_t ms, int32_t timer);
+
+static void shim_request(void *data)
+{
+  bui_go_host_request((uint32_t)(uintptr_t)data);
+}
+
+static void shim_set_cursor(void *data, int cursor)
+{
+  bui_go_host_set_cursor((uint32_t)(uintptr_t)data, cursor);
+}
+
+static void shim_warp(void *data, int x, int y)
+{
+  bui_go_host_warp((uint32_t)(uintptr_t)data, x, y);
+}
+
+/* Go allocates the result with the module's malloc, and the kit frees it. */
+static char *shim_clipboard_get(void *data)
+{
+  return (char *)(uintptr_t)bui_go_host_clipboard_get((uint32_t)(uintptr_t)data);
+}
+
+static void shim_clipboard_set(void *data, const char *text)
+{
+  bui_go_host_clipboard_set((uint32_t)(uintptr_t)data, (uint32_t)(uintptr_t)text);
+}
+
+static void shim_schedule(void *data, int ms, int timer)
+{
+  bui_go_host_schedule((uint32_t)(uintptr_t)data, ms, timer);
+}
+
+SHIM_EXPORT("bui_context_set_window_host") void bui_context_set_window_host(BKContext *ctx)
+{
+  BKHost host = {ctx,
+                 shim_request,
+                 shim_set_cursor,
+                 shim_warp,
+                 shim_clipboard_get,
+                 shim_clipboard_set,
+                 shim_schedule,
+                 shim_emit};
+  BK_context_set_host(ctx, &host);
+}
+
 /* Images queued or decoding (BKImageStats.pending), so Go need not know the
  * struct's layout. */
 SHIM_EXPORT("bui_image_pending") int32_t bui_image_pending(void)

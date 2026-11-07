@@ -40,6 +40,51 @@ void bui_context_set_emit_host(BKContext *ctx)
   BK_context_set_host(ctx, &host);
 }
 
+/* `data` is the context, which is how Go finds its window host. */
+static void bui_request(void *data)
+{
+  buiGoHostRequest(data);
+}
+
+static void bui_set_cursor(void *data, int cursor)
+{
+  buiGoHostSetCursor(data, cursor);
+}
+
+static void bui_warp(void *data, int x, int y)
+{
+  buiGoHostWarp(data, x, y);
+}
+
+/* C.CString is malloc, and the kit frees the result. */
+static char *bui_clipboard_get(void *data)
+{
+  return buiGoHostClipboardGet(data);
+}
+
+static void bui_clipboard_set(void *data, const char *text)
+{
+  buiGoHostClipboardSet(data, (char *)text);
+}
+
+static void bui_schedule(void *data, int ms, int timer)
+{
+  buiGoHostSchedule(data, ms, timer);
+}
+
+void bui_context_set_window_host(BKContext *ctx)
+{
+  BKHost host = {ctx,
+                 bui_request,
+                 bui_set_cursor,
+                 bui_warp,
+                 bui_clipboard_get,
+                 bui_clipboard_set,
+                 bui_schedule,
+                 bui_emit};
+  BK_context_set_host(ctx, &host);
+}
+
 static void bui_wake(void)
 {
   buiGoWake();

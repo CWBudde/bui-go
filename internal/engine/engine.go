@@ -31,6 +31,34 @@ const (
 	EvClick  = 2
 )
 
+// Modifier bits of input calls, as the kit's BK_SHIFT and so on.
+const (
+	ModShift   = 1
+	ModCtrl    = 2
+	ModAlt     = 4
+	ModButton1 = 8
+)
+
+// Rect is a rectangle in raster pixels.
+type Rect struct{ X, Y, W, H int }
+
+// WindowHost is what the kit asks of the window showing a context: BKHost without
+// emit, which stays with Kit.SetEmit. Its methods run on the UI thread inside a Kit
+// call, so they must not free anything the kit is using.
+type WindowHost interface {
+	// Request asks for a render on the next loop turn.
+	Request()
+	// SetCursor sets the pointer shape, one of the kit's BK_CURSOR_* values.
+	SetCursor(cursor int)
+	// Warp moves the pointer to window coordinates.
+	Warp(x, y int)
+	// ClipboardGet returns the clipboard's text. ok is false if there is none.
+	ClipboardGet() (text string, ok bool)
+	ClipboardSet(text string)
+	// Schedule asks for Kit.Timer(ctx, timer) after ms milliseconds.
+	Schedule(ms, timer int)
+}
+
 // EmitFunc receives a kit event for a node with a non-zero id. The engine filters
 // out events without a node or for kit-internal nodes. It runs on the UI thread,
 // inside the Kit call that caused the event.
@@ -78,6 +106,9 @@ type Kit interface {
 	// ContextSetEmitHost installs the host that forwards events to SetEmit's
 	// receiver. It must run before Host.WindowNew, which saves the host it finds.
 	ContextSetEmitHost(ctx Context)
+	// ContextSetWindowHost installs h, keeping events flowing to SetEmit's receiver.
+	// ContextSetEmitHost and ContextFree uninstall it.
+	ContextSetWindowHost(ctx Context, h WindowHost)
 	// ContextFree destroys the context but not its root.
 	ContextFree(ctx Context)
 
@@ -86,11 +117,45 @@ type Kit interface {
 	// RasterPixels returns a copy of r's pixels as 0x00RRGGBB, row by row. It is a
 	// copy because a view into a module's memory goes stale when that memory grows.
 	RasterPixels(r Raster) []uint32
+	// RasterView returns r's pixels as B, G, R, A bytes, row by row, without copying.
+	// It is valid only until the next Kit call, which can move a module's memory.
+	RasterView(r Raster) []byte
+	// RasterDamage returns the rectangles the last Render or RenderDamage redrew.
+	RasterDamage(r Raster) []Rect
 	// Render lays out and draws the whole tree into r.
 	Render(ctx Context, r Raster, w, h int)
-	// Press and Release send left-button input.
+	// RenderDamage draws what changed, or everything if full. It resizes r to w x h
+	// and returns how many regions it redrew, 0 if nothing changed.
+	RenderDamage(ctx Context, r Raster, w, h int, full bool) int
+	// NeedsRender reports whether anything is waiting to be drawn.
+	NeedsRender(ctx Context) bool
+	// Animating reports whether the host should keep rendering frames.
+	Animating(ctx Context) bool
+	// SetScale sets the UI scale, where 1 means 20 px widgets. It is process-wide.
+	SetScale(scale float32)
+	// ImagePoll hands finished image decodes to the cache and returns how many.
+	ImagePoll() int
+
+	// Press and Release send left-button input with no other modifiers.
 	Press(ctx Context, x, y int)
 	Release(ctx Context, x, y int)
+	// PressMods and ReleaseMods are Press and Release with explicit Mod* bits. A host
+	// passes the state as the kit documents it: ModButton1 on the press, not the release.
+	PressMods(ctx Context, x, y, mods int)
+	ReleaseMods(ctx Context, x, y, mods int)
+	// Motion, Wheel, Scroll, Key, KeyRelease, Button and ContextMenu send input and
+	// return whether anything changed. Scroll's dx and dy are wheel notches, with
+	// dx > 0 right and dy > 0 up. keysym is an X keysym name, and text the characters
+	// the key typed, "" for none.
+	Motion(ctx Context, x, y, mods int) bool
+	Wheel(ctx Context, x, y, delta, mods int) bool
+	Scroll(ctx Context, x, y int, dx, dy float32, mods int) bool
+	Key(ctx Context, text, keysym string, mods int) bool
+	KeyRelease(ctx Context, keysym string, mods int) bool
+	Button(ctx Context, x, y, button int, release bool, mods int) bool
+	ContextMenu(ctx Context, x, y, mods int) bool
+	// Timer fires a timer asked for through WindowHost.Schedule.
+	Timer(ctx Context, timer int)
 
 	// EvalNumber evaluates a number expression. It returns false if invalid.
 	EvalNumber(expr string) (float64, bool)

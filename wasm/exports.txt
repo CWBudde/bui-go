@@ -30,6 +30,16 @@ BK_render
 BK_press
 BK_release
 BK_motion
+BK_wheel
+BK_scroll
+BK_key
+BK_key_release
+BK_button
+BK_context_menu
+BK_timer
+BK_animating
+BK_needs_render
+BK_set_scale
 BK_image_poll
 BK_node_set_image_source
 
@@ -40,6 +50,7 @@ BUI_raster_pixels
 BUI_raster_width
 BUI_raster_height
 BUI_raster_invalidate
+BUI_raster_damage
 
 # window host stubs (kit_window_null.c): the Go host replaces them
 BK_window_supported

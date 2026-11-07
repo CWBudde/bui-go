@@ -31,17 +31,23 @@ var (
 	_ engine.Host = Host{}
 )
 
-// The event kinds must equal the kit's: either difference overflows uint at
+// The event kinds and modifiers must equal the kit's: either difference overflows uint at
 // compile time if they do not.
 const (
 	_ = uint(C.BK_EV_CHANGE-engine.EvChange) + uint(engine.EvChange-C.BK_EV_CHANGE)
 	_ = uint(C.BK_EV_CLICK-engine.EvClick) + uint(engine.EvClick-C.BK_EV_CLICK)
+	_ = uint(C.BK_SHIFT-engine.ModShift) + uint(engine.ModShift-C.BK_SHIFT)
+	_ = uint(C.BK_CTRL-engine.ModCtrl) + uint(engine.ModCtrl-C.BK_CTRL)
+	_ = uint(C.BK_ALT-engine.ModAlt) + uint(engine.ModAlt-C.BK_ALT)
+	_ = uint(C.BK_BUTTON1-engine.ModButton1) + uint(engine.ModButton1-C.BK_BUTTON1)
 )
 
 // The kit's callbacks, set once from the UI thread and read on it.
 var (
 	emitFunc engine.EmitFunc
 	wakeFunc func()
+	// windowHosts holds each context's window host.
+	windowHosts = map[engine.Context]engine.WindowHost{}
 )
 
 // ptr turns an opaque reference back into its C pointer. It points into C memory,
@@ -166,10 +172,22 @@ func (Kit) ContextNew(root engine.Node) engine.Context {
 }
 
 // ContextSetEmitHost implements engine.Kit.
-func (Kit) ContextSetEmitHost(ctx engine.Context) { C.bui_context_set_emit_host(context(ctx)) }
+func (Kit) ContextSetEmitHost(ctx engine.Context) {
+	C.bui_context_set_emit_host(context(ctx))
+	delete(windowHosts, ctx)
+}
+
+// ContextSetWindowHost implements engine.Kit.
+func (Kit) ContextSetWindowHost(ctx engine.Context, h engine.WindowHost) {
+	windowHosts[ctx] = h
+	C.bui_context_set_window_host(context(ctx))
+}
 
 // ContextFree implements engine.Kit.
-func (Kit) ContextFree(ctx engine.Context) { C.BK_context_free(context(ctx)) }
+func (Kit) ContextFree(ctx engine.Context) {
+	C.BK_context_free(context(ctx))
+	delete(windowHosts, ctx)
+}
 
 // RasterNew implements engine.Kit.
 func (Kit) RasterNew(w, h int) engine.Raster {
@@ -203,6 +221,110 @@ func (Kit) Press(ctx engine.Context, x, y int) {
 // Release implements engine.Kit.
 func (Kit) Release(ctx engine.Context, x, y int) {
 	C.BK_release(context(ctx), C.int(x), C.int(y), C.BK_BUTTON1)
+}
+
+// PressMods implements engine.Kit.
+func (Kit) PressMods(ctx engine.Context, x, y, mods int) {
+	C.BK_press(context(ctx), C.int(x), C.int(y), C.int(mods))
+}
+
+// ReleaseMods implements engine.Kit.
+func (Kit) ReleaseMods(ctx engine.Context, x, y, mods int) {
+	C.BK_release(context(ctx), C.int(x), C.int(y), C.int(mods))
+}
+
+// Motion implements engine.Kit.
+func (Kit) Motion(ctx engine.Context, x, y, mods int) bool {
+	return C.BK_motion(context(ctx), C.int(x), C.int(y), C.int(mods)) != 0
+}
+
+// Wheel implements engine.Kit.
+func (Kit) Wheel(ctx engine.Context, x, y, delta, mods int) bool {
+	return C.BK_wheel(context(ctx), C.int(x), C.int(y), C.int(delta), C.int(mods)) != 0
+}
+
+// Scroll implements engine.Kit.
+func (Kit) Scroll(ctx engine.Context, x, y int, dx, dy float32, mods int) bool {
+	return C.BK_scroll(context(ctx), C.int(x), C.int(y), C.float(dx), C.float(dy), C.int(mods)) != 0
+}
+
+// Key implements engine.Kit.
+func (Kit) Key(ctx engine.Context, text, keysym string, mods int) bool {
+	ct, freeText := cstr(text)
+	defer freeText()
+	cs, freeSym := cstr(keysym)
+	defer freeSym()
+	return C.BK_key(context(ctx), ct, cs, C.int(mods)) != 0
+}
+
+// KeyRelease implements engine.Kit.
+func (Kit) KeyRelease(ctx engine.Context, keysym string, mods int) bool {
+	cs, free := cstr(keysym)
+	defer free()
+	return C.BK_key_release(context(ctx), cs, C.int(mods)) != 0
+}
+
+// Button implements engine.Kit.
+func (Kit) Button(ctx engine.Context, x, y, button int, release bool, mods int) bool {
+	r := C.int(0)
+	if release {
+		r = 1
+	}
+	return C.BK_button(context(ctx), C.int(x), C.int(y), C.int(button), r, C.int(mods)) != 0
+}
+
+// ContextMenu implements engine.Kit.
+func (Kit) ContextMenu(ctx engine.Context, x, y, mods int) bool {
+	return C.BK_context_menu(context(ctx), C.int(x), C.int(y), C.int(mods)) != 0
+}
+
+// Timer implements engine.Kit.
+func (Kit) Timer(ctx engine.Context, timer int) { C.BK_timer(context(ctx), C.int(timer)) }
+
+// RenderDamage implements engine.Kit.
+func (Kit) RenderDamage(ctx engine.Context, r engine.Raster, w, h int, full bool) int {
+	f := C.int(0)
+	if full {
+		f = 1
+	}
+	return int(C.BK_render(context(ctx), raster(r), C.int(w), C.int(h), f))
+}
+
+// NeedsRender implements engine.Kit.
+func (Kit) NeedsRender(ctx engine.Context) bool { return C.BK_needs_render(context(ctx)) != 0 }
+
+// Animating implements engine.Kit.
+func (Kit) Animating(ctx engine.Context) bool { return C.BK_animating(context(ctx)) != 0 }
+
+// SetScale implements engine.Kit.
+func (Kit) SetScale(scale float32) { C.BK_set_scale(C.float(scale)) }
+
+// ImagePoll implements engine.Kit.
+func (Kit) ImagePoll() int { return int(C.BK_image_poll()) }
+
+// RasterView implements engine.Kit.
+func (Kit) RasterView(r engine.Raster) []byte {
+	c := raster(r)
+	n := 4 * int(C.BUI_raster_width(c)) * int(C.BUI_raster_height(c))
+	pixels := C.BUI_raster_pixels(c)
+	if pixels == nil || n == 0 {
+		return nil
+	}
+	return unsafe.Slice((*byte)(unsafe.Pointer(pixels)), n)
+}
+
+// RasterDamage implements engine.Kit.
+func (Kit) RasterDamage(r engine.Raster) []engine.Rect {
+	var rects *[4]C.int
+	n := int(C.BUI_raster_damage(raster(r), &rects)) //nolint:gocritic // cgo expands &rects
+	if n <= 0 || rects == nil {
+		return nil
+	}
+	damage := make([]engine.Rect, n)
+	for i, v := range unsafe.Slice(rects, n) {
+		damage[i] = engine.Rect{X: int(v[0]), Y: int(v[1]), W: int(v[2]), H: int(v[3])}
+	}
+	return damage
 }
 
 // EvalNumber implements engine.Kit.
@@ -254,6 +376,66 @@ func buiGoEmit(id C.uint32_t, kind C.int, a C.double) {
 	returned := false
 	defer engine.ExitIfUnwinding(&returned)
 	emitFunc(uint32(id), int(kind), float64(a))
+	returned = true
+}
+
+// windowHostOf finds the window host of the context in a trampoline's data. The bridge
+// installs the trampolines only together with an entry.
+func windowHostOf(data unsafe.Pointer) engine.WindowHost {
+	return windowHosts[engine.Context(data)]
+}
+
+//export buiGoHostRequest
+func buiGoHostRequest(data unsafe.Pointer) {
+	returned := false
+	defer engine.ExitIfUnwinding(&returned)
+	windowHostOf(data).Request()
+	returned = true
+}
+
+//export buiGoHostSetCursor
+func buiGoHostSetCursor(data unsafe.Pointer, cursor C.int) {
+	returned := false
+	defer engine.ExitIfUnwinding(&returned)
+	windowHostOf(data).SetCursor(int(cursor))
+	returned = true
+}
+
+//export buiGoHostWarp
+func buiGoHostWarp(data unsafe.Pointer, x, y C.int) {
+	returned := false
+	defer engine.ExitIfUnwinding(&returned)
+	windowHostOf(data).Warp(int(x), int(y))
+	returned = true
+}
+
+// buiGoHostClipboardGet returns malloc'd memory, which the kit frees, or NULL.
+//
+//export buiGoHostClipboardGet
+func buiGoHostClipboardGet(data unsafe.Pointer) *C.char {
+	returned := false
+	defer engine.ExitIfUnwinding(&returned)
+	var out *C.char
+	if text, ok := windowHostOf(data).ClipboardGet(); ok {
+		out = C.CString(text)
+	}
+	returned = true
+	return out
+}
+
+//export buiGoHostClipboardSet
+func buiGoHostClipboardSet(data unsafe.Pointer, text *C.char) {
+	returned := false
+	defer engine.ExitIfUnwinding(&returned)
+	windowHostOf(data).ClipboardSet(C.GoString(text))
+	returned = true
+}
+
+//export buiGoHostSchedule
+func buiGoHostSchedule(data unsafe.Pointer, ms, timer C.int) {
+	returned := false
+	defer engine.ExitIfUnwinding(&returned)
+	windowHostOf(data).Schedule(int(ms), int(timer))
 	returned = true
 }
 

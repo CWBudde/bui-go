@@ -187,6 +187,15 @@ func ptr[R ~uintptr](r R) uint64 {
 	return api.EncodeU32(uint32(r))
 }
 
+// boolInt encodes a boolean as a C int.
+func boolInt(v bool) uint64 {
+	if v {
+		return i32(1)
+	}
+
+	return i32(0)
+}
+
 // truth decodes a C int used as a boolean.
 func truth(res uint64) bool { return api.DecodeI32(res) != 0 }
 
@@ -353,11 +362,24 @@ func (k Kit) ContextNew(root engine.Node) engine.Context {
 
 // ContextSetEmitHost implements engine.Kit.
 func (k Kit) ContextSetEmitHost(ctx engine.Context) {
-	k.get().call("bui_context_set_emit_host", ptr(ctx))
+	m := k.get()
+	m.call("bui_context_set_emit_host", ptr(ctx))
+	delete(m.windowHosts, ctx)
+}
+
+// ContextSetWindowHost implements engine.Kit.
+func (k Kit) ContextSetWindowHost(ctx engine.Context, h engine.WindowHost) {
+	m := k.get()
+	m.windowHosts[ctx] = h
+	m.call("bui_context_set_window_host", ptr(ctx))
 }
 
 // ContextFree implements engine.Kit.
-func (k Kit) ContextFree(ctx engine.Context) { k.get().call("BK_context_free", ptr(ctx)) }
+func (k Kit) ContextFree(ctx engine.Context) {
+	m := k.get()
+	m.call("BK_context_free", ptr(ctx))
+	delete(m.windowHosts, ctx)
+}
 
 // RasterNew implements engine.Kit.
 func (k Kit) RasterNew(w, h int) engine.Raster {
@@ -412,6 +434,143 @@ func (k Kit) Press(ctx engine.Context, x, y int) {
 // Release implements engine.Kit.
 func (k Kit) Release(ctx engine.Context, x, y int) {
 	k.get().call("BK_release", ptr(ctx), i32(x), i32(y), i32(bkButton1))
+}
+
+// PressMods implements engine.Kit.
+func (k Kit) PressMods(ctx engine.Context, x, y, mods int) {
+	k.get().call("BK_press", ptr(ctx), i32(x), i32(y), i32(mods))
+}
+
+// ReleaseMods implements engine.Kit.
+func (k Kit) ReleaseMods(ctx engine.Context, x, y, mods int) {
+	k.get().call("BK_release", ptr(ctx), i32(x), i32(y), i32(mods))
+}
+
+// Motion implements engine.Kit.
+func (k Kit) Motion(ctx engine.Context, x, y, mods int) bool {
+	return truth(k.get().call("BK_motion", ptr(ctx), i32(x), i32(y), i32(mods)))
+}
+
+// Wheel implements engine.Kit.
+func (k Kit) Wheel(ctx engine.Context, x, y, delta, mods int) bool {
+	return truth(k.get().call("BK_wheel", ptr(ctx), i32(x), i32(y), i32(delta), i32(mods)))
+}
+
+// Scroll implements engine.Kit.
+func (k Kit) Scroll(ctx engine.Context, x, y int, dx, dy float32, mods int) bool {
+	return truth(k.get().call("BK_scroll", ptr(ctx), i32(x), i32(y),
+		api.EncodeF32(dx), api.EncodeF32(dy), i32(mods)))
+}
+
+// Key implements engine.Kit.
+func (k Kit) Key(ctx engine.Context, text, keysym string, mods int) bool {
+	m := k.get()
+	ct := m.scratch(strSize(text) + strSize(keysym))
+	cs := m.putStr(ct, text)
+	m.putStr(cs, keysym)
+
+	return truth(m.call("BK_key", ptr(ctx), api.EncodeU32(ct), api.EncodeU32(cs), i32(mods)))
+}
+
+// KeyRelease implements engine.Kit.
+func (k Kit) KeyRelease(ctx engine.Context, keysym string, mods int) bool {
+	m := k.get()
+
+	return truth(m.call("BK_key_release", ptr(ctx), api.EncodeU32(m.cstr(keysym)), i32(mods)))
+}
+
+// Button implements engine.Kit.
+func (k Kit) Button(ctx engine.Context, x, y, button int, release bool, mods int) bool {
+	return truth(k.get().call("BK_button", ptr(ctx), i32(x), i32(y), i32(button), boolInt(release), i32(mods)))
+}
+
+// ContextMenu implements engine.Kit.
+func (k Kit) ContextMenu(ctx engine.Context, x, y, mods int) bool {
+	return truth(k.get().call("BK_context_menu", ptr(ctx), i32(x), i32(y), i32(mods)))
+}
+
+// Timer implements engine.Kit.
+func (k Kit) Timer(ctx engine.Context, timer int) {
+	k.get().call("BK_timer", ptr(ctx), i32(timer))
+}
+
+// RenderDamage implements engine.Kit.
+func (k Kit) RenderDamage(ctx engine.Context, r engine.Raster, w, h int, full bool) int {
+	return int(api.DecodeI32(k.get().call("BK_render", ptr(ctx), ptr(r), i32(w), i32(h), boolInt(full))))
+}
+
+// NeedsRender implements engine.Kit.
+func (k Kit) NeedsRender(ctx engine.Context) bool {
+	return truth(k.get().call("BK_needs_render", ptr(ctx)))
+}
+
+// Animating implements engine.Kit.
+func (k Kit) Animating(ctx engine.Context) bool {
+	return truth(k.get().call("BK_animating", ptr(ctx)))
+}
+
+// SetScale implements engine.Kit.
+func (k Kit) SetScale(scale float32) { k.get().call("BK_set_scale", api.EncodeF32(scale)) }
+
+// ImagePoll implements engine.Kit.
+func (k Kit) ImagePoll() int { return int(api.DecodeI32(k.get().call("BK_image_poll"))) }
+
+// RasterView implements engine.Kit.
+func (k Kit) RasterView(r engine.Raster) []byte {
+	const pixelSize = 4
+
+	m := k.get()
+	w := uint64(api.DecodeU32(m.call("BUI_raster_width", ptr(r))))
+	h := uint64(api.DecodeU32(m.call("BUI_raster_height", ptr(r))))
+	pixels := api.DecodeU32(m.call("BUI_raster_pixels", ptr(r)))
+
+	size := pixelSize * w * h
+	if pixels == 0 || size == 0 {
+		return nil
+	}
+
+	if size > math.MaxUint32 {
+		fatalf("wasm kit raster of %d x %d is too large", w, h)
+	}
+
+	b, ok := m.mod.Memory().Read(pixels, uint32(size)) //nolint:gosec // checked above
+	if !ok {
+		fatalf("wasm kit raster at %#x out of range", pixels)
+	}
+
+	return b
+}
+
+// RasterDamage implements engine.Kit. C owns the array, an int[4] per rectangle.
+func (k Kit) RasterDamage(r engine.Raster) []engine.Rect {
+	const (
+		pointerSize = 4
+		intSize     = 4
+		rectInts    = 4
+	)
+
+	m := k.get()
+	out := m.scratch(pointerSize)
+	n := int(api.DecodeI32(m.call("BUI_raster_damage", ptr(r), api.EncodeU32(out))))
+
+	if n <= 0 {
+		return nil
+	}
+
+	rects := uint32(m.readI32(out)) //nolint:gosec // an address the module wrote
+	damage := make([]engine.Rect, n)
+
+	for i := range damage {
+		p := rects + uint32(i)*intSize*rectInts
+		damage[i] = engine.Rect{
+			X: m.readI32(p),
+			Y: m.readI32(p + intSize),
+			W: m.readI32(p + 2*intSize),
+			H: m.readI32(p + 3*intSize),
+		}
+	}
+
+	return damage
 }
 
 // EvalNumber implements engine.Kit. The result goes first in the buffer, which keeps
