@@ -504,10 +504,14 @@ Notes from this phase:
   into a handler and back, not a whole click as a user sees it.
 - **Hot calls do not allocate.** `TestHotCallsDoNotAllocate` and `TestEmitDoesNotAllocate` hold it at 0 for input, render,
   properties and an emit with a call from its handler. `RasterDamage` allocates its result, once per damaged frame.
-- **No leaks, by the only measure there is.** 2000 create/close cycles of a tree with a window host, a raster, input and
-  an edit grow memory by nothing, and neither do resize cycles up to 1200x900. Linear memory never shrinks, so a test sees
-  only growth, and a leak under about 30 bytes per cycle would hide in a 64 KiB page. The peak stays for the process's
-  life: one large window keeps its raster's size in memory after it closes.
+- **No leaks in the binding, by the only measure there is, and one in the kit.** 2000 create/close cycles of a tree with a
+  window host, a raster, input and an edit grow memory by nothing, and neither do resize cycles up to 1200x900. Linear memory
+  never shrinks, so a test sees only growth, and a leak under about 30 bytes per cycle hides in a 64 KiB page: that test
+  missed the kit's own leak, which `-asan` found natively. `BK_context_free` does not release the context's undo history, so
+  closing a context after an edit loses the field's old text (4260 bytes per close with a 4096-byte string,
+  `TestKnownLeakOfUndoHistory`). It costs little in practice, as contexts close rarely. The sanitizer run suppresses it with
+  `scripts/lsan.supp`, as the BUI tree stays unmodified. Not filed upstream yet. The peak stays for the process's life: one
+  large window keeps its raster's size in memory after it closes.
 - **Out of memory is fatal.** Past the 1 GiB limit `malloc` returns NULL and the kit does not check, and in the module a
   NULL write hits the stack's bottom with nothing to stop it. `wasm/compat.c` wraps `malloc`, `calloc` and `realloc` with
   `--wrap` and traps, after a message on stderr. The export Go calls stays unwrapped, so Go reports its own size. So a
@@ -528,21 +532,37 @@ Do not start before Phase 3 proves the `Host` interface. Headless works everywhe
 
 ### Phase 6: CI, docs, release
 
-- [ ] CI
-  - [ ] Cgo engine with `-race`; the `-asan` and `xdotool` runs move from manual into CI if they are stable
-  - [ ] Wasm engine on Linux, with `-race` through the `bui_nocgo` tag, and `CGO_ENABLED=0` without it
-  - [ ] Build `CGO_ENABLED=0 GOOS={linux,windows,darwin} GOARCH={amd64,arm64}`
-  - [ ] Test with cgo **on** on Linux arm64 and macOS, which must select the wasm engine and link
-  - [ ] Rebuild `bui_kit.wasm` from `BUI_COMMIT` and require identical bytes
-  - [ ] Check the `.wasm` size budget
-- [ ] README and package docs
-  - [ ] Replace "Linux amd64 only" and the "Linux cgo spike" package comment with an engine table
-  - [ ] Document `bui_nocgo`, the compilation cache, the limits below, and the interpreter's speed on other architectures
-- [ ] Licensing
-  - [ ] State that a binary with the wasm engine is distributed under GPLv3, because of Apache-2.0 wazero
-  - [ ] Give the `.wasm`'s corresponding source: BUI at `BUI_COMMIT`, `wasm/`, `build-wasm.sh`, and the wasi-sdk version
-  - [ ] Add notices for wazero, xgb, wasi-libc, libc++ and the embedded Inter font
-- [ ] Tag a first release once Phase 3 is green
+- [x] CI
+  - [x] Cgo engine with `-race`; the `-asan` and `xdotool` runs move from manual into CI if they are stable
+  - [x] Wasm engine on Linux, with `-race` through the `bui_nocgo` tag, and `CGO_ENABLED=0` without it
+  - [x] Build `CGO_ENABLED=0 GOOS={linux,windows,darwin} GOARCH={amd64,arm64}`
+  - [x] Test with cgo **on** on Linux arm64 and macOS, which must select the wasm engine and link
+  - [x] Rebuild `bui_kit.wasm` from `BUI_COMMIT` and require identical bytes
+  - [x] Check the `.wasm` size budget
+- [x] README and package docs
+  - [x] Replace "Linux amd64 only" and the "Linux cgo spike" package comment with an engine table
+  - [x] Document `bui_nocgo`, the compilation cache, the limits below, and the interpreter's speed on other architectures
+- [x] Licensing
+  - [x] State that a binary with the wasm engine is distributed under GPLv3, because of Apache-2.0 wazero
+  - [x] Give the `.wasm`'s corresponding source: BUI at `BUI_COMMIT`, `wasm/`, `build-wasm.sh`, and the wasi-sdk version
+  - [x] Add notices for wazero, xgb, wasi-libc, libc++ and the embedded Inter font
+- [ ] Tag a first release once Phase 3 is green. This is the maintainer's decision, and it needs CI to have run first
+
+Notes from this phase:
+
+- **None of the new CI has run on GitHub.** The branch is not pushed. Locally the Linux jobs' commands pass, cross-builds
+  and test binaries compile for every target, and `scripts/check-wasm.sh` passes. **Linux arm64 and macOS have never been
+  run**, only compiled: `GOOS=darwin` and `GOARCH=arm64` builds select the right files, which is all a cross-compile shows.
+- **The module rebuilds byte-identically from another checkout path,** which Phase 0 had not tried: a new worktree in another
+  directory, with BUI fetched afresh, gives the same SHA-256 for both modules. CI relies on that.
+- **`-asan` needs the symbol table.** `go test` strips it, and the suppression for the kit's undo leak matches a function
+  name, so the run passes `-ldflags='-s=false -w=false'`. The allocation tests skip under `-asan`, whose instrumentation
+  allocates.
+- **Licence texts:** `licenses/` holds wazero's, xgb's, Inter's and X11's. wasi-sdk's archive carries none for wasi-libc and
+  libc++, so `NOTICES.md` links upstream, which a distributor may want to replace with copies. These statements follow this
+  plan's reading of the licences and have had no legal review.
+- **`spike/wasm` stays.** It holds the image-pending test, the stack-peak test and the startup benchmark, which nothing else
+  has, so `internal/enginetest` does not cover it yet.
 
 ## Known limits of the cgo-free path
 
@@ -582,10 +602,13 @@ Do not start before Phase 3 proves the `Host` interface. Headless works everywhe
 
 ## Final verification
 
-- [ ] `CGO_ENABLED=0 go build ./... && CGO_ENABLED=0 go test ./...` on Linux amd64
-- [ ] `go test -race ./...` and `go test -tags bui_nocgo -race ./...`, to run both engines on one machine
-- [ ] Golden comparison of cgo and wasm within the agreed tolerance
-- [ ] `xvfb-run -a go test ./...` and `BUI_TEST_XDOTOOL=1 xvfb-run -a go test -run '^TestX' .` on the wasm engine
-- [ ] `CGO_ENABLED=0 GOOS=windows go build ./...` and the same for `darwin`
-- [ ] `ldd` on the built `examples/counter` reports "not a dynamic executable"
-- [ ] Manual, under a real X session: run the counter example, hover, drag the slider, resize, close with the window button
+- [x] `CGO_ENABLED=0 go build ./... && CGO_ENABLED=0 go test ./...` on Linux amd64
+- [x] `go test -race ./...` and `go test -tags bui_nocgo -race ./...`, to run both engines on one machine
+- [x] Golden comparison of cgo and wasm within the agreed tolerance: exact on every stage
+- [x] `xvfb-run -a go test ./...` and `BUI_TEST_XDOTOOL=1 xvfb-run -a go test -run '^TestX' .` on the wasm engine
+- [x] `CGO_ENABLED=0 GOOS=windows go build ./...` and the same for `darwin`
+- [x] `ldd` on the built `examples/counter` reports "not a dynamic executable"
+- [ ] Manual, under a real X session: run the counter example, hover, drag the slider, resize, close with the window button.
+      Drawing, the `Do` ticker, resizing and the close button were checked on a real session and window manager, through
+      `xdotool windowsize` and `wmctrl -c`. Hovering and dragging with a real pointer were not, as that takes over the desk
+      of whoever sits there; they were driven on Xvfb only

@@ -3,17 +3,17 @@
 Experimental Go bindings for [BUI](https://github.com/ppmpreetham/BUI), which provides Blender's UI widgets as a C
 library. This is an independent project, not part of BUI.
 
-**Status: Linux amd64 spike.** It proves linking, UI-thread ownership, C-to-Go callbacks and calls from goroutines. The
-API is small and will change, and there are no tagged releases.
+**Status: experimental.** The API is small and will change, and there are no tagged releases.
 
 ## Try it
 
-You need Go 1.26 or newer, cgo with a C and C++ toolchain, and an X11 session. CMake is not needed, because the static
-libraries are committed.
+You need Go 1.26 or newer. With no C toolchain, and on any platform for headless use:
 
 ```sh
-go run ./examples/counter
+CGO_ENABLED=0 go run ./examples/counter
 ```
+
+On Linux that opens a real window through X11 or XWayland, as a static binary.
 
 ```go
 button := bui.NewNode("button")
@@ -25,6 +25,42 @@ button.OnClick(func() { /* runs on the UI thread */ })
 bui.Do(func() { clock.SetStr("text", "updated") }) // safe from any goroutine
 ```
 
+## Engines
+
+The same API runs on two engines, chosen when you build:
+
+| Build                                 | Engine                                                                              | Windows                    | Needs               |
+| ------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------- | ------------------- |
+| Linux amd64 with cgo                  | Native: static libraries in `lib/`                                                  | X11                        | C and C++ toolchain |
+| Anything else, or the tag `bui_nocgo` | WebAssembly: an embedded module, in [wazero](https://github.com/tetratelabs/wazero) | X11 in pure Go, Linux only | Nothing but Go      |
+
+`go build -tags bui_nocgo` selects the wasm engine on a machine that would otherwise use cgo. Both engines draw the same
+pixels: the tests compare them exactly. On Windows and macOS the wasm engine runs headless, and `NewWindow` and `Run` report
+`ErrNoDisplay`.
+
+**Speed.** On amd64 and arm64 wazero compiles the module, which renders at about 2-4x native time and handles a hover at
+about 1.2-3x. A full 1920x1080 frame takes about 13 ms when the machine is not loaded. Other architectures use wazero's
+interpreter, at 100-1000x native: a small tree renders in about 36 ms and a dense full-HD frame in over a second, so they
+are for correctness rather than interaction. `PLAN.md` has the measurements, and `scripts/bench.sh` records new ones.
+
+**Compilation cache.** The first start compiles the module, which takes about 0.2-0.3 s. The result is cached in
+`os.UserCacheDir()/bui-go/wazero`, which brings later starts to about 25 ms. A cache that cannot be read or written costs only
+that time. The module loads at the first kit call, so importing the package costs nothing.
+
+### Limits of the wasm engine
+
+- No GPU window, video or file browser, and no worker threads. Image sources would stay pending forever, though the API sets
+  none today.
+- Only the embedded Inter font works by default.
+- Core X cursors, not the desktop's theme, and no Compose or IME input. A dead key types its own character.
+- `EvalNumber` accepts an expression whose intermediate inf or nan turns finite again, such as `1/(1/0)`, as wasm has no
+  floating-point exception flags.
+- No guard pages: inside the module a NULL read or a bad offset returns what memory holds, where native code would crash.
+- Closing a context after an edit loses the edited field's old text, in the kit's own code, on either engine.
+- Linear memory never shrinks, so the largest raster a process had stays in its footprint. Past 1 GiB the process ends with
+  a message, as it does on any fault in the module: its state is unknown after one.
+- It depends on an experimental wazero feature, so wazero is pinned, and upgrades are deliberate changes.
+
 ## Threading
 
 Call `bui.Run` from the main goroutine. Kit calls are valid only on the UI thread: the main goroutine before and after
@@ -32,23 +68,25 @@ Call `bui.Run` from the main goroutine. Kit calls are valid only on the UI threa
 
 ## Known limits
 
-- Linux amd64 only.
 - The binding exposes generic properties (`SetNum`, `SetStr`), not typed widgets.
 - `Run` on the main goroutine is documented, not enforced.
 - `Do` calls made after the last `Run` stay queued, and a leftover `Do(bui.Quit)` ends the next `Run` immediately.
-- Continuous rendering could delay `Do`.
-- The window manager's close button has no automated test.
+- Continuous rendering could delay `Do` on the native engine.
+- The window manager's close button is tested through the message it sends, not through a real window manager.
 
 ## Tests
 
 ```sh
-xvfb-run -a go test -race ./...
-CC=gcc xvfb-run -a go test -asan ./...
+xvfb-run -a go test -race ./...                       # native engine, compared with the wasm one
+xvfb-run -a go test -race -tags bui_nocgo ./...       # package bui on the wasm engine
+CGO_ENABLED=0 xvfb-run -a go test ./...               # with no cgo at all
+CC=gcc LSAN_OPTIONS=suppressions=$PWD/scripts/lsan.supp xvfb-run -a go test -asan -ldflags='-s=false -w=false' ./...
 BUI_TEST_XDOTOOL=1 xvfb-run -a go test -race -run '^TestX' .
+go test -tags bui_xlibref ./internal/host/x11/        # key translation against libX11, needs its headers
 ```
 
-Tests that need a window are skipped when there is no display. The last command sends real clicks and drags with
-`xdotool`.
+Tests that need a window are skipped when there is no display. `BUI_TEST_XDOTOOL=1` sends real clicks and keys and changes
+the keyboard layout, so use a display of its own. `internal/host/x11` starts its own Xvfb when it can.
 
 ## Development
 
@@ -59,18 +97,28 @@ just lint         # golangci-lint, at the version pinned in the justfile
 just check        # formatting, go.mod tidiness, lint and tests
 ```
 
-CI runs the same checks (`.github/workflows/test.yaml`).
+CI runs the same checks and more (`.github/workflows/test.yaml`).
 
 ## Licence and source of the binaries
 
 This repository is GPL-2.0-or-later, matching the SPDX headers in BUI's source. Its `LICENSE` file is copied from BUI and
 contains the GPLv3 text. A program that links this package must comply with the GPL.
 
-`lib/linux_amd64/` contains static libraries built from BUI, including the FreeType, libjpeg-turbo, libwebp and Wuffs
-code vendored in BUI's tree. The corresponding source is BUI at the commit in [`BUI_COMMIT`](BUI_COMMIT). To rebuild it:
+**A binary with the wasm engine is distributed under GPLv3,** not GPLv2: it includes wazero, which is Apache-2.0, and that
+licence is compatible with GPLv3 only. This is the "or later" in BUI's licence at work. [`NOTICES.md`](NOTICES.md) lists the
+third-party parts and their licences.
+
+The corresponding source of the committed binaries is:
+
+- `lib/linux_amd64/`, static libraries including the FreeType, libjpeg-turbo, libwebp and Wuffs code vendored in BUI's tree:
+  BUI at the commit in [`BUI_COMMIT`](BUI_COMMIT), built by `scripts/build-kit.sh`.
+- `internal/engine/wasmengine/bui_kit.wasm`, and the test's `sjlj_probe.wasm`: the same BUI commit, `wasm/` in this
+  repository, and wasi-sdk 34.0, whose version and checksum are in `scripts/build-wasm.sh`, which builds them.
 
 ```sh
 scripts/build-kit.sh
+scripts/build-wasm.sh
 ```
 
-Build paths are stripped from the output, so rebuilds on the same toolchain from another directory are byte-identical.
+Build paths are stripped from the output, so rebuilds on the same toolchain from another directory are byte-identical. CI
+rebuilds the module and requires identical bytes.

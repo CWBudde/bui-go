@@ -38,6 +38,15 @@ fix: lint-fix fmt
 test:
     xvfb-run -a go test -race ./...
 
+# Run tests on the wasm engine, with cgo and then without
+test-wasm:
+    xvfb-run -a go test -race -tags bui_nocgo ./...
+    CGO_ENABLED=0 xvfb-run -a go test ./...
+
+# Rebuild the wasm module and require identical bytes and the size budget
+check-wasm:
+    ./scripts/check-wasm.sh
+
 # Run all checks
 check: check-formatted check-tidy lint test
 

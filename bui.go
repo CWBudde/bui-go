@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-// Package bui is a Linux cgo spike of a Go binding to BUI's C kit.
+// Package bui is a Go binding to BUI's C kit, which provides Blender's UI widgets.
+//
+// Engines: on Linux amd64 with cgo it calls the kit natively. Everywhere else, and with
+// the build tag bui_nocgo, it runs the kit as an embedded WebAssembly module with no cgo:
+// with a real window on Linux through X11, and headless on other systems, where NewWindow
+// and Run report ErrNoDisplay. The API and the pixels are the same. A binary with the
+// wasm engine is distributed under GPLv3. The README has the limits of each engine.
 //
 // Threading: Run must be called from the main goroutine, and all kit-touching
 // API is UI-thread only, meaning the main goroutine before and after Run, and
