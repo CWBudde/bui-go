@@ -47,6 +47,8 @@ type options struct {
 	// cacheDir holds compiled code, if not empty.
 	cacheDir         string
 	memoryLimitPages uint32
+	// fs is what to mount. Production mounts nothing: see moduleConfig.
+	fs wazero.FSConfig
 }
 
 func defaultOptions() options {
@@ -162,7 +164,12 @@ func instantiate(ctx context.Context, bin []byte, o options, cache wazero.Compil
 		return nil, fmt.Errorf("host module: %w", err)
 	}
 
-	m.mod, err = m.runtime.InstantiateWithConfig(ctx, bin, moduleConfig())
+	cfg := moduleConfig()
+	if o.fs != nil {
+		cfg = cfg.WithFSConfig(o.fs)
+	}
+
+	m.mod, err = m.runtime.InstantiateWithConfig(ctx, bin, cfg)
 	if err != nil {
 		_ = m.runtime.Close(ctx)
 
