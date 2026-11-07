@@ -3,6 +3,7 @@
 package wasmengine
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/CWBudde/bui-go/internal/engine"
@@ -12,6 +13,10 @@ import (
 // pointer makes one per X event. RasterDamage has to build its result, and only Go
 // strings cross back.
 func TestHotCallsDoNotAllocate(t *testing.T) {
+	if asanBuild {
+		t.Skip("-asan's instrumentation allocates")
+	}
+
 	m := loadForTest(t, options{cacheDir: sharedCache, memoryLimitPages: memoryLimitPages})
 	k := Kit{m: m}
 
@@ -54,6 +59,10 @@ func TestHotCallsDoNotAllocate(t *testing.T) {
 
 // A click handler comes in through the module and back: emit, handler, a call from it.
 func TestEmitDoesNotAllocate(t *testing.T) {
+	if asanBuild {
+		t.Skip("-asan's instrumentation allocates")
+	}
+
 	m := loadForTest(t, options{cacheDir: sharedCache, memoryLimitPages: memoryLimitPages})
 	k := Kit{m: m}
 
@@ -75,8 +84,9 @@ func TestEmitDoesNotAllocate(t *testing.T) {
 }
 
 // memoryAfterWarmup runs cycle until the module's memory settles, then many more times,
-// and fails if it grew. Linear memory never shrinks, so growth is all a test can see,
-// and the count has to outrun a page's worth of slack in the allocator.
+// and fails if it grew. Linear memory never shrinks, so growth is all a test can see, and
+// the cycle has to outrun a page's worth of slack in the allocator: small leaks need long
+// strings to show, as TestKnownLeakOfUndoHistory found out.
 func memoryAfterWarmup(t *testing.T, m *module, warmup, runs int, cycle func()) {
 	t.Helper()
 
@@ -207,3 +217,62 @@ func (leakHost) Warp(int, int)                {}
 func (leakHost) ClipboardGet() (string, bool) { return "", false }
 func (leakHost) ClipboardSet(string)          {}
 func (leakHost) Schedule(int, int)            {}
+
+// The kit keeps a copy of a text field's old text in the context's undo history, and
+// BK_context_free does not release it (PLAN.md, Phase 6 notes). It is the kit's own code,
+// and it costs that text once per context closed after an edit. A long string shows it.
+// This pins the cost, and if a kit update fixes it this fails, so that the note can go.
+func TestKnownLeakOfUndoHistory(t *testing.T) {
+	m := loadForTest(t, options{cacheDir: sharedCache, memoryLimitPages: memoryLimitPages})
+	k := Kit{m: m}
+
+	k.SetEmit(func(uint32, int, float64) {})
+
+	const size, cycles = 4096, 200
+
+	long := strings.Repeat("x", size)
+
+	cycle := func(edit bool) {
+		root := k.NodeNew("frame")
+		text := k.NodeNew("text")
+		k.NodeSetID(text, 1)
+		k.NodeAdd(root, text)
+		k.GeomSetPack(text)
+		k.GeomSet(text, "fill", 1)
+		k.SetStr(text, "text", long)
+
+		ctx := k.ContextNew(root)
+		k.ContextSetEmitHost(ctx)
+
+		r := k.RasterNew(kitW, kitH)
+		k.Render(ctx, r, kitW, kitH)
+
+		if edit {
+			x, y := center(k, text)
+			clickAt(k, ctx, x, y)
+			k.Key(ctx, "a", "a", 0)
+			k.Key(ctx, "", "Return", 0)
+		}
+
+		k.ContextFree(ctx)
+		k.RasterFree(r)
+		k.NodeFree(text)
+		k.NodeFree(root)
+	}
+
+	// Without an edit there is no history, and nothing grows.
+	memoryAfterWarmup(t, m, 50, cycles, func() { cycle(false) })
+
+	before := m.mod.Memory().Size()
+
+	for range cycles {
+		cycle(true)
+	}
+
+	grew := m.mod.Memory().Size() - before
+	t.Logf("memory grew %d bytes over %d contexts closed after editing a %d-byte string", grew, cycles, size)
+
+	if grew < size*cycles/2 {
+		t.Errorf("memory grew only %d bytes: the kit's leak looks fixed", grew)
+	}
+}
