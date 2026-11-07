@@ -5,7 +5,7 @@
 // Package xlibref calls libX11, as the reference for the Go keyboard translation. It
 // needs libX11's headers, which nothing else in a build does, so it has its own tag:
 //
-//	xvfb-run -a go test -tags bui_xlibref ./internal/host/x11/
+//	go test -tags bui_xlibref ./internal/host/x11/
 package xlibref
 
 /*

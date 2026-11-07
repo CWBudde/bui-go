@@ -5,8 +5,8 @@
 package x11
 
 import (
-	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/CWBudde/bui-go/internal/host/x11/xlibref"
@@ -30,7 +30,21 @@ var referenceStates = []struct {
 	{"shift+altgr", uint16(xproto.ModMaskShift | xproto.ModMask5)},
 	{"ctrl", uint16(xproto.ModMaskControl)},
 	{"alt", uint16(xproto.ModMask1)},
+	{"group2", groupTwo},
+	{"group2+shift", groupTwo | uint16(xproto.ModMaskShift)},
+	{"group2+caps", groupTwo | uint16(xproto.ModMaskLock)},
+	{"group2+altgr", groupTwo | uint16(xproto.ModMask5)},
+	{"group2+shift+altgr", groupTwo | uint16(xproto.ModMaskShift|xproto.ModMask5)},
+	{"group3", groupThree},
+	{"group3+shift", groupThree | uint16(xproto.ModMaskShift)},
+	{"group3+altgr", groupThree | uint16(xproto.ModMask5)},
 }
+
+// The layouts past the first, in the bits an XKB-aware client finds them.
+const (
+	groupTwo   = uint16(1 << 13)
+	groupThree = uint16(2 << 13)
+)
 
 func compareWithXlib(t *testing.T) {
 	t.Helper()
@@ -41,7 +55,7 @@ func compareWithXlib(t *testing.T) {
 	}
 	defer c.Close()
 
-	k, err := newKeyboard(c)
+	k, err := newKeyboard(c, enableXKB(c))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +74,12 @@ func compareWithXlib(t *testing.T) {
 			want, text := d.Lookup(byte(code), st.state)
 			got := k.lookup(byte(code), st.state)
 			compared++
+
+			// Xlib's case conversion gives µ the code point of Μ as its keysym, which names
+			// nothing. Greek_MU is the real keysym of that letter.
+			if got == 0x7cc && want == 0x39c {
+				continue
+			}
 
 			if got != want {
 				wrong++
@@ -97,19 +117,26 @@ func checkText(t *testing.T, code int, state string, bits uint16, sym uint32, wa
 
 func TestLookupMatchesXlib(t *testing.T) { compareWithXlib(t) }
 
-// Other layouts need setxkbmap, which changes the server for everyone, so only on a
-// private display.
+// Other layouts need setxkbmap, which changes the server for everyone.
 func TestLookupMatchesXlibOnLayouts(t *testing.T) {
-	if os.Getenv("BUI_TEST_XDOTOOL") != "1" {
-		t.Skip("opt-in with BUI_TEST_XDOTOOL=1, on a private display")
-	}
+	requirePrivateDisplay(t)
 
-	if _, err := exec.LookPath("setxkbmap"); err != nil {
-		t.Skip("no setxkbmap")
-	}
-
-	for _, layout := range [][]string{{"us"}, {"de"}, {"de", "-variant", "nodeadkeys"}, {"fr"}, {"ru"}, {"gr"}, {"us", "-variant", "dvorak"}} {
-		t.Run(layout[0]+"/"+layoutVariant(layout), func(t *testing.T) {
+	for _, layout := range [][]string{
+		{"us"},
+		{"de"},
+		{"de", "-variant", "nodeadkeys"},
+		{"fr"},
+		{"ru"},
+		{"gr"},
+		{"us", "-variant", "dvorak"},
+		{"us,ru"},
+		{"de,gr"},
+		{"ru,us"},
+		{"us,de"},
+		{"de,us"},
+		{"us,ru,de"},
+	} {
+		t.Run(strings.ReplaceAll(layout[0], ",", "+")+"/"+layoutVariant(layout), func(t *testing.T) {
 			if out, err := exec.Command("setxkbmap", layout...).CombinedOutput(); err != nil {
 				t.Skipf("setxkbmap %v: %v\n%s", layout, err, out)
 			}

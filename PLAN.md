@@ -443,13 +443,16 @@ Notes from the calls and shared tests:
 
 Notes from the host:
 
-- **The keyboard needs no XKB client.** An XKB server presents its keymap through the core request too, with columns for
-  group 1, group 2, then group 1's levels 3 and 4, so AltGr works. Against `XLookupString` and `XKeysymToString` on every
-  keycode under ten modifier states, keysyms and names have no difference on us, de, de nodeadkeys, fr, ru, gr and dvorak
-  (`go test -tags bui_xlibref ./internal/host/x11/`, which needs libX11's headers; layouts other than the current one
-  also need `BUI_TEST_XDOTOOL=1`, as `setxkbmap` changes the server for everyone).
-- **The comparison only covers those seven layouts,** and it knows three key types by rule: letters, keypads, and Print and
-  Pause. A layout with another key type could translate differently. Compose and dead-key sequences do nothing, as in C.
+- **The keyboard speaks just enough XKB.** xgb has no XKB package, so `keyboard_xkb.go` writes out `UseExtension` and
+  `GetMap`. Both are needed: without `UseExtension` the server reports group 2 as Mod5, the same bit as AltGr, and only
+  `GetMap` tells which columns are which, as `us,de` and `de,us` put different things in the same core columns. A review
+  caught a second layout not typing, and a probe on a real server showed why. A server without XKB uses the core keymap
+  and its protocol rules, which only the unit tests exercise.
+- **Keysyms match libX11.** On every keycode under 18 modifier and group states, on us, de, de nodeadkeys, fr, ru, gr,
+  dvorak, us+ru, de+gr, ru+us, us+de, de+us and us+ru+de, the one difference is a deliberate one: Shift+Caps on `µ` gives
+  the real keysym where Xlib's case conversion gives one that names nothing (`go test -tags bui_xlibref
+  ./internal/host/x11/`, which needs libX11's headers). `TestSecondLayoutReachesEvents` types a real key on both layouts.
+- **A dead key types its spacing character,** as Xlib's text does. There is no Compose, as in C.
 - **Text is always UTF-8 on the Go host.** The C host's `XLookupString` answers in the locale's encoding, and nothing
   calls `setlocale`, so typing `ä` natively gives a Latin-1 byte. That is a bug of the C path, not fixed here.
 - **xgb blocks when its queue of 500 events is full, and it reads replies from the same socket.** A UI thread waiting for
@@ -462,8 +465,10 @@ Notes from the host:
   100 iterations, load not recorded). A full frame happens on an expose or a resize, and damage covers the rest. Together
   with the render, a full 1080p frame misses 16 ms, so a tree that animates the whole window would call for SHM; nothing
   in the API does that today. Phase 4's benchmarks track it.
-- **Xvfb resets when its last client disconnects,** and a connection made during the reset fails, which reads as "no
-  display". `internal/host/x11`'s `TestMain` holds one connection for the whole run for that reason.
+- **`internal/host/x11`'s tests start their own Xvfb.** On a shared display, windows of a test binary running in parallel
+  cover theirs and show in the pixels they read back, and clipboards collide, which `go test ./...` hit under load. With a
+  server of their own they can also change the layout and send real input, and never open windows on a desktop. Without
+  Xvfb they use `DISPLAY` and skip what would change it.
 
 ### Phase 4: hardening
 

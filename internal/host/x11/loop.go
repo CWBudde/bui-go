@@ -32,7 +32,6 @@ func (h *Host) Run() {
 // turn is one pass of the loop: wait, then events, timers and renders.
 func (h *Host) turn() {
 	h.wait()
-	h.checkConnection()
 
 	for {
 		ev := h.events.pop()
@@ -42,6 +41,8 @@ func (h *Host) turn() {
 
 		h.handle(ev)
 	}
+
+	h.checkConnection()
 
 	now := time.Now()
 
@@ -63,10 +64,13 @@ func (h *Host) windowsSnapshot() []*window {
 // wait blocks until there is something to do, in one select over X events, timers,
 // frames and the wake channel. A pending wake runs whether or not this blocks: the C
 // host only reads its pipe when it would block, so an animation starves Do.
+//
+// The queue is looked at rather than trusted to signal: notify holds one signal, which
+// a burst shares and which peek and waitFor can consume.
 func (h *Host) wait() {
 	wait, forever := h.nextWait(time.Now())
 
-	if !h.events.empty() {
+	if h.events.hasWork() {
 		wait, forever = 0, false
 	}
 
@@ -183,7 +187,7 @@ func (h *Host) handle(ev xgb.Event) {
 	switch e := ev.(type) {
 	case xproto.SelectionRequestEvent:
 		h.handleSelectionRequest(e)
-	case xproto.MappingNotifyEvent:
+	case xproto.MappingNotifyEvent, xkbEvent:
 		h.handleMapping()
 	case xproto.ExposeEvent:
 		if win := h.findX(e.Window); win != nil && e.Count == 0 {
@@ -227,7 +231,7 @@ func (h *Host) handle(ev xgb.Event) {
 // handleMapping reads the keymap again after a layout change. The C host never does, so
 // its windows keep the keymap they started with until XLookupString refreshes it.
 func (h *Host) handleMapping() {
-	kb, err := newKeyboard(h.c)
+	kb, err := newKeyboard(h.c, h.keyboard.opcode)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bui: cannot read the new keymap: %v\n", err)
 

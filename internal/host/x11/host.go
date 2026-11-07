@@ -116,7 +116,7 @@ func (h *Host) connect(c *xgb.Conn) error {
 		return err
 	}
 
-	kb, err := newKeyboard(c)
+	kb, err := newKeyboard(c, enableXKB(c))
 	if err != nil {
 		return err
 	}

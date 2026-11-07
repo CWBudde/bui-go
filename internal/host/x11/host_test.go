@@ -3,11 +3,13 @@
 package x11
 
 import (
+	"bufio"
 	"errors"
 	"os"
 	"os/exec"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,20 +17,83 @@ import (
 	"github.com/CWBudde/bui-go/internal/engine/wasmengine"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
+	"github.com/jezek/xgb/xtest"
 )
 
-// TestMain holds a connection for the whole run. Xvfb resets when its last client goes,
-// and a new connection during that reset fails, which would read as "no display".
-func TestMain(m *testing.M) {
-	c, err := xgb.NewConn()
+// privateDisplay says the tests have an X server to themselves, so that they may change
+// its layout and send it real input.
+var privateDisplay bool
 
+// TestMain gives the tests their own X server when Xvfb is there. On a shared one they
+// would fail by no fault of the host: windows of another test binary, which go test runs
+// in parallel, cover theirs and show in what they read back, and clipboards collide. Nor
+// do they then open windows on a real desktop. Subprocesses inherit DISPLAY.
+func TestMain(m *testing.M) {
+	stop := startXvfb()
 	code := m.Run()
 
-	if err == nil {
-		c.Close()
+	stop()
+	os.Exit(code)
+}
+
+// startXvfb sets DISPLAY to a new server and returns what ends it. Xvfb picks a free
+// display and writes its number to the file descriptor it is told. -noreset is needed as
+// it otherwise resets when its last client goes, and a connection during that fails.
+func startXvfb() (stop func()) {
+	path, err := exec.LookPath("Xvfb")
+	if err != nil || os.Getenv(childEnv) != "" {
+		return func() {}
 	}
 
-	os.Exit(code)
+	r, w, err := os.Pipe()
+	if err != nil {
+		return func() {}
+	}
+	defer r.Close()
+
+	const displayFD = "3" // the first of ExtraFiles
+
+	cmd := exec.Command(path, "-displayfd", displayFD, "-screen", "0", "1280x1024x24", "-nolisten", "tcp", "-noreset")
+	cmd.ExtraFiles = []*os.File{w}
+
+	err = cmd.Start()
+
+	_ = w.Close() // the server has its own copy, and EOF must mean it is gone
+
+	if err != nil {
+		return func() {}
+	}
+
+	stop = func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}
+
+	line, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil {
+		stop()
+
+		return func() {}
+	}
+
+	os.Setenv("DISPLAY", ":"+strings.TrimSpace(line))
+
+	privateDisplay = true
+
+	return stop
+}
+
+// requirePrivateDisplay skips a test that changes the server or sends it input.
+func requirePrivateDisplay(t *testing.T) {
+	t.Helper()
+
+	if !privateDisplay {
+		t.Skip("needs Xvfb for a server of its own")
+	}
+
+	if _, err := exec.LookPath("setxkbmap"); err != nil {
+		t.Skip("no setxkbmap")
+	}
 }
 
 // fixture is a host on the process's wasm kit with one window on a tree that fills it.
@@ -1092,6 +1157,88 @@ func TestMappingNotifyRereadsTheKeymap(t *testing.T) {
 	}
 }
 
+// The state an event carries decides the layout, so this is the end of the chain that
+// the comparison with Xlib cannot see: what the server really sends after enableXKB. It
+// sends real keys and changes the layout.
+func TestSecondLayoutReachesEvents(t *testing.T) {
+	requirePrivateDisplay(t)
+
+	if out, err := exec.Command("setxkbmap", "us,ru", "-option", "grp:caps_toggle").CombinedOutput(); err != nil {
+		t.Skipf("setxkbmap: %v\n%s", err, out)
+	}
+
+	t.Cleanup(func() { _ = exec.Command("setxkbmap", "us", "-option", "").Run() })
+
+	f := newFixture(t, "text", 300, 40)
+	f.show()
+
+	if err := xtest.Init(f.h.c); err != nil {
+		t.Skipf("no XTEST: %v", err)
+	}
+
+	const (
+		evdevQ    = 24
+		evdevCaps = 66
+	)
+
+	tap := func(code xproto.Keycode) {
+		screen := xproto.Setup(f.h.c).DefaultScreen(f.h.c)
+		xtest.FakeInput(f.h.c, xproto.KeyPress, byte(code), 0, screen.Root, 0, 0, 0)
+		xtest.FakeInput(f.h.c, xproto.KeyRelease, byte(code), 0, screen.Root, 0, 0, 0)
+		f.settle()
+	}
+
+	x, y := f.center()
+	f.press(buttonLeft, x, y, 0)
+	f.release(buttonLeft, x, y, xproto.KeyButMaskButton1)
+	xproto.SetInputFocus(f.h.c, xproto.InputFocusParent, f.w.xid, xproto.TimeCurrentTime)
+	f.settle()
+
+	f.pump(func() bool { return f.h.keyboard.xkb != nil && f.h.keyboard.lookup(evdevQ, 1<<13) != 'q' })
+
+	tap(evdevQ)
+	tap(evdevCaps)
+	tap(evdevQ)
+	tap(evdevCaps)
+	tap(evdevQ)
+	f.k.Key(f.ctx, "", "Return", 0)
+
+	if got := f.k.GetStr(f.child, "text"); got != "qйq" {
+		t.Errorf("typed %q, want the second layout's letter in the middle", got)
+	}
+}
+
+// A client with XKB enabled gets no core MappingNotify, so a layout change has to reach
+// it through XKB's events.
+func TestLayoutChangeReachesTheHost(t *testing.T) {
+	requirePrivateDisplay(t)
+
+	if out, err := exec.Command("setxkbmap", "us").CombinedOutput(); err != nil {
+		t.Skipf("setxkbmap: %v\n%s", err, out)
+	}
+
+	f := newFixture(t, "text", 300, 40)
+	f.show()
+
+	if f.h.keyboard.xkb == nil {
+		t.Skip("no XKB on this server")
+	}
+
+	const evdevY = 29
+
+	if got := f.h.keyboard.lookup(evdevY, 0); got != 'y' {
+		t.Fatalf("the us layout gives %#x", got)
+	}
+
+	if out, err := exec.Command("setxkbmap", "de").CombinedOutput(); err != nil {
+		t.Skipf("setxkbmap: %v\n%s", err, out)
+	}
+
+	t.Cleanup(func() { _ = exec.Command("setxkbmap", "us").Run() })
+
+	f.pump(func() bool { return f.h.keyboard.lookup(evdevY, 0) == 'z' })
+}
+
 func TestSupportedWithoutDisplay(t *testing.T) {
 	t.Setenv("DISPLAY", "")
 
@@ -1130,6 +1277,21 @@ func TestChildProcess(t *testing.T) {
 		f := newFixture(t, "button", 100, 40)
 		f.h.c.Close()
 		f.h.Run()
+	case "connection-lost-signal-consumed":
+		// Another waiter took the one signal, as a key release's peek can.
+		f := newFixture(t, "button", 100, 40)
+		f.settle()
+		f.h.events.close()
+		<-f.h.events.notify
+		f.h.Run()
+	case "connection-lost-behind-events":
+		// The events and the closing share one signal, and the closing only counts once
+		// the events are gone.
+		f := newFixture(t, "button", 100, 40)
+		f.settle()
+		f.h.events.push(xproto.ExposeEvent{Window: f.w.xid, Count: 1})
+		f.h.events.close()
+		f.h.Run()
 	}
 
 	t.Fatal("the process survived")
@@ -1142,6 +1304,8 @@ func TestFatalPathsExit(t *testing.T) {
 	}{
 		{"wake-panic", 2},
 		{"connection-lost", 1},
+		{"connection-lost-signal-consumed", 1},
+		{"connection-lost-behind-events", 1},
 	} {
 		t.Run(tc.child, func(t *testing.T) {
 			if _, err := xgb.NewConn(); err != nil {

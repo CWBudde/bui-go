@@ -1321,7 +1321,16 @@ func TestNodeIDWrapSkipsZeroAndLive(t *testing.T) {
 }
 
 // Real key events, through the server's keymap: what the host's translation is for.
-func xTypeInto(t *testing.T, title string, keys ...string) string {
+func xTypeInto(t *testing.T, title, text string) string {
+	t.Helper()
+
+	return xInputInto(t, title, func() {
+		xdotool(t, "type", "--delay", "20", text)
+	})
+}
+
+// xInputInto clicks a text field, runs input on its own goroutine, and commits.
+func xInputInto(t *testing.T, title string, input func()) string {
 	t.Helper()
 
 	root, text, win := xWindow(t, "text", title)
@@ -1333,9 +1342,7 @@ func xTypeInto(t *testing.T, title string, keys ...string) string {
 		xdotool(t, "click", "1")
 		time.Sleep(50 * time.Millisecond)
 
-		for _, k := range keys {
-			xdotool(t, append([]string{"type", "--delay", "20"}, k)...)
-		}
+		input()
 
 		xdotool(t, "key", "Return")
 		time.Sleep(100 * time.Millisecond)

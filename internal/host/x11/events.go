@@ -132,6 +132,10 @@ func (q *eventQueue) waitFor(wait time.Duration, match func(xgb.Event) bool) xgb
 			return ev
 		}
 
+		if q.isClosed() {
+			return nil
+		}
+
 		select {
 		case <-q.notify:
 		case <-deadline.C:
@@ -160,6 +164,14 @@ func (q *eventQueue) empty() bool {
 	defer q.mu.Unlock()
 
 	return len(q.events) == 0
+}
+
+// hasWork reports whether the loop must not block: events wait, or the connection went.
+func (q *eventQueue) hasWork() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	return len(q.events) > 0 || q.closed
 }
 
 func (q *eventQueue) isClosed() bool {

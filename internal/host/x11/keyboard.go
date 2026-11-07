@@ -12,18 +12,14 @@ import (
 	"github.com/jezek/xgb/xproto"
 )
 
-// Keysyms the translation has to recognize. xLevel3Shift is ISO_Level3_Shift, as the
-// server's core keymap reports AltGr.
+// Keysyms the translation has to recognize.
 const (
-	xkModeSwitch  = 0xff7e
-	xkNumLock     = 0xff7f
-	xkLevel3Shift = 0xfe03
-	xkCapsLock    = 0xffe5
-	xkKPSpace     = 0xff80
-	xkKPEqual     = 0xffbd
-	xkDelete      = 0xffff
-	xkPrint       = 0xff61
-	xkPause       = 0xff13
+	xkModeSwitch = 0xff7e
+	xkNumLock    = 0xff7f
+	xkCapsLock   = 0xffe5
+	xkKPSpace    = 0xff80
+	xkKPEqual    = 0xffbd
+	xkDelete     = 0xffff
 	// unicodeKeysym marks a keysym that holds its character directly.
 	unicodeKeysym = 0x01000000
 )
@@ -33,23 +29,26 @@ const (
 	modLock    = uint16(xproto.ModMaskLock)
 	modShift   = uint16(xproto.ModMaskShift)
 	modControl = uint16(xproto.ModMaskControl)
-	modAlt     = uint16(xproto.ModMask1)
 )
 
-// keyboard is the server's core keymap. libX11 translates through XKB, which xgb does
-// not implement, but an XKB server also presents its keymap in the core request, with
-// columns group 1 level 1 and 2, group 2 level 1 and 2, group 1 level 3 and 4.
+// keyboard is the server's keymap. xkb is XKB's own map, which is all libX11 uses. Only
+// a server without XKB, which is rare, falls back on the core request and its protocol
+// rules, in the other fields.
 type keyboard struct {
+	xkb *xkbMap
+	// opcode is XKB's, 0 without it. A new keymap has to be fetched the same way.
+	opcode byte
+
 	minCode byte
 	perCode int
 	syms    []uint32
 
-	numLock, modeSwitch, level3 uint16
-	capsLock                    bool
+	numLock, modeSwitch uint16
+	capsLock            bool
 }
 
 // newKeyboard asks the server for its keymap.
-func newKeyboard(c *xgb.Conn) (*keyboard, error) {
+func newKeyboard(c *xgb.Conn, opcode byte) (*keyboard, error) {
 	setup := xproto.Setup(c)
 	count := byte(setup.MaxKeycode - setup.MinKeycode + 1)
 
@@ -64,6 +63,7 @@ func newKeyboard(c *xgb.Conn) (*keyboard, error) {
 	}
 
 	k := &keyboard{
+		opcode:  opcode,
 		minCode: byte(setup.MinKeycode),
 		perCode: int(mapping.KeysymsPerKeycode),
 		syms:    make([]uint32, len(mapping.Keysyms)),
@@ -74,6 +74,13 @@ func newKeyboard(c *xgb.Conn) (*keyboard, error) {
 	}
 
 	k.readModifiers(mods)
+
+	if opcode != 0 {
+		k.xkb, err = fetchXKBMap(c, opcode)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	return k, nil
 }
@@ -91,8 +98,6 @@ func (k *keyboard) readModifiers(mods *xproto.GetModifierMappingReply) {
 					k.numLock |= 1 << mod
 				case xkModeSwitch:
 					k.modeSwitch |= 1 << mod
-				case xkLevel3Shift:
-					k.level3 |= 1 << mod
 				case xkCapsLock:
 					if 1<<mod == modLock {
 						k.capsLock = true
@@ -115,40 +120,30 @@ func (k *keyboard) row(code byte) []uint32 {
 
 // lookup translates a keycode and an event's modifier state to a keysym, 0 for none.
 func (k *keyboard) lookup(code byte, state uint16) uint32 {
+	if k.xkb != nil {
+		return k.xkb.lookup(code, state)
+	}
+
 	row := k.row(code)
 	if row == nil {
 		return 0
 	}
 
-	first, second := k.levels(row, state)
+	first, second := k.coreLevels(row, state)
 
-	return k.applyLevel(first, second, state)
+	return k.coreLevel(first, second, state)
 }
 
-// levels picks the two keysyms of the group and level-3 state, falling back to the
-// first group for a key with nothing in the chosen columns.
-func (k *keyboard) levels(row []uint32, state uint16) (first, second uint32) {
-	base := 0
+// coreLevels picks the pair of the group, as the core protocol has it: Mode_switch
+// selects the second, and a key with nothing there uses the first.
+func (k *keyboard) coreLevels(row []uint32, state uint16) (first, second uint32) {
 	if state&k.modeSwitch != 0 {
-		base = 2
-	}
-
-	if state&k.level3 != 0 {
-		// Group 1's levels 3 and 4 sit in columns 4 and 5, and group 2's further on.
-		base += 4
-		if base == 6 {
-			base = 8
-		}
-	}
-
-	for _, b := range []int{base, base &^ 3, 0} {
-		a, s := column(row, b), column(row, b+1)
-		if a != 0 || s != 0 {
+		if a, s := column(row, 2), column(row, 3); a != 0 || s != 0 {
 			return normalize(a, s)
 		}
 	}
 
-	return 0, 0
+	return normalize(column(row, 0), column(row, 1))
 }
 
 func column(row []uint32, i int) uint32 {
@@ -174,34 +169,24 @@ func normalize(a, s uint32) (first, second uint32) {
 	return a, a
 }
 
-// applyLevel chooses between a pair. For a letter Shift and Caps Lock cancel, as XKB's
-// ALPHABETIC key type has it.
-func (k *keyboard) applyLevel(first, second uint32, state uint16) uint32 {
+// coreLevel chooses between a pair by the core protocol's rules: Num Lock makes a keypad
+// key's second keysym the default, and Caps Lock uppercases what Shift selects.
+func (k *keyboard) coreLevel(first, second uint32, state uint16) uint32 {
 	shift := state&modShift != 0
-	lock := state&modLock != 0 && k.capsLock
 
-	// These two keys have their own key types, whose second level does not use Shift.
-	switch first {
-	case xkPrint:
-		return choose(state&modAlt != 0, second, first)
-	case xkPause:
-		return choose(state&modControl != 0, second, first)
+	if isKeypad(second) && state&k.numLock != 0 {
+		return choose(shift, first, second)
 	}
 
-	// As the usual keypad key type has it: the second level only with Num Lock on and
-	// Shift off, so Shift gives the navigation keysym with Num Lock in either state.
-	if isKeypad(second) {
-		if !shift && state&k.numLock != 0 {
-			return second
-		}
+	sym := choose(shift, second, first)
 
-		return first
+	if state&modLock != 0 && k.capsLock {
+		_, upper := convertCase(sym)
+
+		return upper
 	}
 
-	lower, upper := convertCase(first)
-	letter := lower != upper && first == lower && second == upper
-
-	return choose(shift != (letter && lock), second, first)
+	return sym
 }
 
 func choose(v bool, yes, no uint32) uint32 {
@@ -319,9 +304,34 @@ func keysymText(sym uint32) string {
 	}
 
 	r := keysymRune(sym)
+	if r == 0 {
+		r = deadKeyRune[sym]
+	}
+
 	if r == 0 || !utf8.ValidRune(r) {
 		return ""
 	}
 
 	return string(r)
+}
+
+// deadKeyRune is what a dead key types by itself, as in libX11's table. There is no
+// Compose here, so without this a ^ key on a German keyboard would type nothing.
+var deadKeyRune = map[uint32]rune{
+	0xfe50: '`',      // dead_grave
+	0xfe51: '\u00b4', // dead_acute
+	0xfe52: '^',      // dead_circumflex
+	0xfe53: '~',      // dead_tilde
+	0xfe54: '\u00af', // dead_macron
+	0xfe55: '\u02d8', // dead_breve
+	0xfe56: '\u02d9', // dead_abovedot
+	0xfe57: '\u00a8', // dead_diaeresis
+	0xfe58: '\u02da', // dead_abovering
+	0xfe59: '\u02dd', // dead_doubleacute
+	0xfe5a: '\u02c7', // dead_caron
+	0xfe5b: '\u00b8', // dead_cedilla
+	0xfe5c: '\u02db', // dead_ogonek
+	0xfe5d: '\u037a', // dead_iota
+	0xfe5e: '\u309b', // dead_voiced_sound
+	0xfe5f: '\u309c', // dead_semivoiced_sound
 }
