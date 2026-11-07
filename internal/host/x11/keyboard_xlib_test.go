@@ -46,6 +46,15 @@ const (
 	groupThree = uint16(2 << 13)
 )
 
+// keysymRespellings are the names libX11 versions disagree on: 1.8.7 gives the keys
+// here, 1.8.13 the values. Each pair is one keysym, and the kit matches neither name.
+// Other aliases still fail, since the kit does match names such as Return.
+var keysymRespellings = map[string]string{
+	"guillemetleft":  "guillemotleft",
+	"guillemetright": "guillemotright",
+	"ordmasculine":   "masculine",
+}
+
 func compareWithXlib(t *testing.T) {
 	t.Helper()
 
@@ -89,8 +98,8 @@ func compareWithXlib(t *testing.T) {
 				continue
 			}
 
-			if name := keysymName(got); want != 0 && name != xlibref.Name(want) {
-				t.Errorf("keysym %#x: name %q, Xlib %q", got, name, xlibref.Name(want))
+			if name, ref := keysymName(got), xlibref.Name(want); want != 0 && name != ref && keysymRespellings[name] != ref {
+				t.Errorf("keysym %#x: name %q, Xlib %q", got, name, ref)
 			}
 
 			checkText(t, code, st.name, st.state, got, text)
