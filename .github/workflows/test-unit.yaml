@@ -7,7 +7,8 @@ permissions:
   contents: read
 
 jobs:
-  test-unit:
+  cgo:
+    name: native engine
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -16,9 +17,115 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install X server and headers
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb libx11-dev
+      - name: Install X server, headers and input tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb libx11-dev xdotool x11-xkb-utils
 
-      # The ASAN run and the xdotool run from the README stay manual.
+      # This also compares the engines, and the key translation with libX11.
+      - name: Run tests with the race detector
+        run: xvfb-run -a go test -race -tags bui_xlibref ./...
+
+      # Only a fuzz run looks past the seeds and testdata/fuzz, and it takes one target at a time.
+      - name: Fuzz the comparison of the engines briefly
+        run: |
+          for target in FuzzEvalNumber FuzzSetStr FuzzKeyInput; do
+            go test -run '^$' -fuzz "^$target\$" -fuzztime 20s ./internal/enginetest/
+          done
+
+      - name: Run tests with the address sanitizer
+        run: CC=gcc LSAN_OPTIONS=suppressions=$PWD/scripts/lsan.supp xvfb-run -a go test -asan -ldflags='-s=false -w=false' ./...
+
+      - name: Send real input
+        run: BUI_TEST_XDOTOOL=1 xvfb-run -a go test -race -run '^TestX' .
+
+  wasm:
+    name: wasm engine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install X server and input tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xdotool x11-xkb-utils
+
+      - name: Run tests with the race detector, through the tag
+        run: xvfb-run -a go test -race -tags bui_nocgo ./...
+
+      - name: Run tests with no cgo at all
+        run: CGO_ENABLED=0 xvfb-run -a go test ./...
+
+      - name: Send real input
+        run: BUI_TEST_XDOTOOL=1 xvfb-run -a go test -race -tags bui_nocgo -run '^TestX' .
+
+  # With cgo on, these must select the wasm engine and link: only Linux amd64 has
+  # native libraries.
+  other-platforms:
+    name: cgo on, ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install X server
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb x11-xkb-utils
+
       - name: Run tests
-        run: xvfb-run -a go test -race ./...
+        if: runner.os == 'Linux'
+        run: xvfb-run -a go test ./...
+
+      - name: Run tests, headless
+        if: runner.os != 'Linux'
+        run: go test ./...
+
+  cross-build:
+    name: build without cgo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build for every target
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          for os in linux windows darwin; do
+            for arch in amd64 arm64; do
+              echo "$os/$arch"
+              GOOS=$os GOARCH=$arch go build ./...
+            done
+          done
+
+      - name: Require a static binary
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go build -o counter ./examples/counter
+          # ldd fails on a static binary, and the step's shell has pipefail.
+          out="$(LC_ALL=C ldd counter 2>&1 || true)"
+          echo "$out"
+          grep -q 'not a dynamic executable' <<<"$out"
+
+  wasm-module:
+    name: wasm module matches its sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build
+
+      - name: Rebuild, and check the bytes and the size
+        run: ./scripts/check-wasm.sh

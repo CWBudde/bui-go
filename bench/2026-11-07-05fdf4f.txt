@@ -1,0 +1,61 @@
+# 05fdf4f043f5543799c5109d4b27d6e85cf6e06d, load: 5.31 9.63 13.70
+goos: linux
+goarch: amd64
+pkg: github.com/CWBudde/bui-go/internal/enginetest
+cpu: 12th Gen Intel(R) Core(TM) i7-1255U
+BenchmarkWasm/Render/counter-11         	     200	    177440 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Render/counter-11         	     200	    311916 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Render/counter-11         	     200	    308160 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Render/dense-11           	     200	   8375598 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Render/dense-11           	     200	   9509666 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Render/dense-11           	     200	  10612774 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Hover/counter-11          	     200	    104117 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Hover/counter-11          	     200	    131925 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Hover/counter-11          	     200	     93110 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Hover/dense-11            	     200	    161867 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Hover/dense-11            	     200	     81701 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Hover/dense-11            	     200	     82768 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Click-11                  	     200	       755.6 ns/op	     117 B/op	       0 allocs/op
+BenchmarkWasm/Click-11                  	     200	       716.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Click-11                  	     200	       759.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/SetNum-11                 	     200	       281.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/SetNum-11                 	     200	       267.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/SetNum-11                 	     200	       268.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Render/counter-11          	     200	     92208 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Render/counter-11          	     200	     89176 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Render/counter-11          	     200	     93267 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Render/dense-11            	     200	   4056362 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Render/dense-11            	     200	   3991711 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Render/dense-11            	     200	   3798732 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Hover/counter-11           	     200	     74569 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Hover/counter-11           	     200	     74376 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Hover/counter-11           	     200	     54502 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Hover/dense-11             	     200	     69551 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Hover/dense-11             	     200	     71952 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Hover/dense-11             	     200	     69493 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Click-11                   	     200	       340.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Click-11                   	     200	       322.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/Click-11                   	     200	       320.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgo/SetNum-11                  	     200	       273.7 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgo/SetNum-11                  	     200	       262.2 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgo/SetNum-11                  	     200	       277.5 ns/op	      16 B/op	       1 allocs/op
+PASS
+ok  	github.com/CWBudde/bui-go/internal/enginetest	8.800s
+XGB: conn.go:70: Trying connection without authority info...
+goos: linux
+goarch: amd64
+pkg: github.com/CWBudde/bui-go/internal/host/x11
+cpu: 12th Gen Intel(R) Core(TM) i7-1255U
+BenchmarkPresentCounter-11    	     100	    341744 ns/op	  484279 B/op	      18 allocs/op
+XGB: conn.go:70: Trying connection without authority info...
+     100	    278658 ns/op	  484333 B/op	      18 allocs/op
+XGB: conn.go:70: Trying connection without authority info...
+     100	    265160 ns/op	  484276 B/op	      18 allocs/op
+XGB: conn.go:70: Trying connection without authority info...
+BenchmarkPresentFullHD-11     	     100	   3766524 ns/op	 8338540 B/op	     138 allocs/op
+XGB: conn.go:70: Trying connection without authority info...
+     100	   3582129 ns/op	 8338476 B/op	     138 allocs/op
+XGB: conn.go:70: Trying connection without authority info...
+     100	   3552909 ns/op	 8338480 B/op	     138 allocs/op
+PASS
+ok  	github.com/CWBudde/bui-go/internal/host/x11	1.390s

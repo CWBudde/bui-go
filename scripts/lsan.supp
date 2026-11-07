@@ -1,0 +1,6 @@
+# LeakSanitizer suppressions for the -asan run. Each entry is the kit's own, in the BUI tree,
+# which stays unmodified. It matches a function name, so the test binaries need their symbols,
+# which go test strips: run with -ldflags='-s=false -w=false'.
+#
+# BK_context_free does not release the context's undo history: docs/design.md, "Leaks".
+leak:bk_strdup

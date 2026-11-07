@@ -786,12 +786,12 @@ func TestWakeRunsDeferredBeforeDo(t *testing.T) {
 	asIfInHandler(func() {
 		h.Close()
 		Do(func() {
-			contextGone = h.ctx.c == nil
+			contextGone = h.ctx.c == 0
 
 			root.Close()
 		})
 	})
-	buiGoWake()
+	handleWake()
 
 	if !contextGone {
 		t.Fatal("the Do ran before the deferred Close requested ahead of it")
@@ -822,12 +822,12 @@ func TestWakeOrderWithPopoverRootOpen(t *testing.T) {
 	asIfInHandler(func() {
 		h.Close()
 		Do(func() {
-			contextGone = h.ctx.c == nil
+			contextGone = h.ctx.c == 0
 
 			root.Close()
 		})
 	})
-	buiGoWake()
+	handleWake()
 
 	if !contextGone || !root.closed() {
 		t.Fatalf("context gone when root closed=%v, root closed=%v, want both", contextGone, root.closed())
@@ -847,8 +847,8 @@ func TestWindowDeferredCloseWakesLoop(t *testing.T) {
 	})
 	runGuarded(t)
 
-	if win.c != nil || !root.closed() {
-		t.Fatalf("window freed=%v root closed=%v, want both", win.c == nil, root.closed())
+	if win.c != 0 || !root.closed() {
+		t.Fatalf("window freed=%v root closed=%v, want both", win.c == 0, root.closed())
 	}
 }
 
@@ -983,9 +983,6 @@ func TestChildProcess(t *testing.T) {
 		})
 		h.Press(x+w/2, y+ht/2)
 		survive(func() { h.Release(x+w/2, y+ht/2) })
-	case "wake-panic":
-		Do(func() { panic("boom") })
-		survive(buiGoWake)
 	}
 
 	fmt.Println("SURVIVED")
@@ -997,7 +994,6 @@ func TestPanicAcrossCFramesExits(t *testing.T) {
 	for _, tc := range []struct{ mode, want string }{
 		{"handler-panic", "boom"},
 		{"handler-goexit", "goroutine "},
-		{"wake-panic", "boom"},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], "-test.run=^TestChildProcess$", "-test.count=1")
@@ -1209,8 +1205,8 @@ func TestXClickClosesWindowAndRoot(t *testing.T) {
 		t.Fatalf("fired=%d depth=%d closedInside=%v, want 1, 1, false", fired, depth, closedInside)
 	}
 
-	if win.c != nil || !root.closed() {
-		t.Fatalf("window freed=%v root closed=%v, want both", win.c == nil, root.closed())
+	if win.c != 0 || !root.closed() {
+		t.Fatalf("window freed=%v root closed=%v, want both", win.c == 0, root.closed())
 	}
 }
 
@@ -1224,7 +1220,7 @@ func TestXClickWindowThenRootInDo(t *testing.T) {
 	btn.OnClick(func() {
 		win.Close()
 		Do(func() {
-			windowGone = win.c == nil
+			windowGone = win.c == 0
 
 			root.Close()
 		})
@@ -1295,5 +1291,156 @@ func TestXDragClosesSlider(t *testing.T) {
 
 	if fired != 1 || !s.closed() {
 		t.Fatalf("fired=%d closed=%v, want 1 and true", fired, s.closed())
+	}
+}
+
+// An id is the only link from the kit to a Node, so a counter that wraps must not
+// produce 0, which means "no id", or take the id of a node that is still alive.
+func TestNodeIDWrapSkipsZeroAndLive(t *testing.T) {
+	savedNodes, savedLast := nodes, lastNodeID
+
+	t.Cleanup(func() { nodes, lastNodeID = savedNodes, savedLast })
+
+	live := &Node{}
+	nodes = map[uint32]*Node{1: live}
+	lastNodeID = math.MaxUint32 - 1
+
+	last, next := &Node{}, &Node{}
+
+	if got := newNodeID(last); got != math.MaxUint32 {
+		t.Fatalf("id before the wrap = %d, want %d", got, uint32(math.MaxUint32))
+	}
+
+	if got := newNodeID(next); got != 2 {
+		t.Fatalf("id after the wrap = %d, want 2", got)
+	}
+
+	if nodes[1] != live {
+		t.Fatal("the wrap took the id of a live node")
+	}
+}
+
+// Real key events, through the server's keymap: what the host's translation is for.
+func xTypeInto(t *testing.T, title, text string) string {
+	t.Helper()
+
+	return xInputInto(t, title, func() {
+		xdotool(t, "type", "--delay", "20", text)
+	})
+}
+
+// xInputInto clicks a text field, runs input on its own goroutine, and commits.
+func xInputInto(t *testing.T, title string, input func()) string {
+	t.Helper()
+
+	root, text, win := xWindow(t, "text", title)
+
+	var got string
+
+	xWhenLaidOut(t, text, title, func(id string, x, y, w, h int) {
+		xdotool(t, "mousemove", "--window", id, strconv.Itoa(x+w/2), strconv.Itoa(y+h/2))
+		xdotool(t, "click", "1")
+		time.Sleep(50 * time.Millisecond)
+
+		input()
+
+		xdotool(t, "key", "Return")
+		time.Sleep(100 * time.Millisecond)
+		Do(func() {
+			got = text.Str("text")
+
+			Quit()
+		})
+	})
+
+	if err := Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	win.Close()
+	root.Close()
+
+	return got
+}
+
+func TestXTypingASCII(t *testing.T) {
+	if got := xTypeInto(t, "bui-go x type", "Hello, W0rld!@#"); got != "Hello, W0rld!@#" {
+		t.Errorf("typed %q", got)
+	}
+}
+
+// The wheel, with a real Ctrl held, steps a slider on every engine.
+func TestXWheelStepsASlider(t *testing.T) {
+	const title = "bui-go x wheel"
+
+	root, slider, win := xWindow(t, "slider", title)
+
+	if err := slider.SetNum("min", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := slider.SetNum("max", 100); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := slider.SetNum("value", 50); err != nil {
+		t.Fatal(err)
+	}
+
+	var got float64
+
+	xWhenLaidOut(t, slider, title, func(id string, x, y, w, h int) {
+		xdotool(t, "mousemove", "--window", id, strconv.Itoa(x+w/2), strconv.Itoa(y+h/2))
+		time.Sleep(50 * time.Millisecond)
+		xdotool(t, "keydown", "ctrl", "click", "4", "keyup", "ctrl")
+		time.Sleep(100 * time.Millisecond)
+		Do(func() {
+			got = slider.Num("value")
+
+			Quit()
+		})
+	})
+
+	if err := Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	win.Close()
+	root.Close()
+
+	if got <= 50 {
+		t.Errorf("the wheel left the value at %v", got)
+	}
+}
+
+func TestNewHeadlessRefusesBadSizes(t *testing.T) {
+	root := NewNode("frame")
+	defer root.Close()
+
+	for _, size := range [][2]int{{0, 10}, {10, 0}, {-1, 10}, {10, -1}, {100000, 100000}, {1 << 30, 1 << 30}, {1 << 62, 4}} {
+		mustPanic(t, "NewHeadless with a bad size", func() { NewHeadless(root, size[0], size[1]) })
+	}
+
+	// Nothing stuck to the root.
+	NewHeadless(root, 10, 10).Close()
+}
+
+// A Quit that a panic kept Run from reaching the loop for must not end the next Run.
+func TestQuitDoesNotOutliveAPanickingRun(t *testing.T) {
+	if !Supported() {
+		t.Skip("no display")
+	}
+
+	Do(Quit)
+	Do(func() { panic("boom") })
+
+	mustPanic(t, "Run", func() { _ = Run() })
+
+	if quitRequested {
+		t.Error("the Quit is still pending")
+	}
+
+	if err := Run(); err != nil {
+		t.Error(err)
 	}
 }

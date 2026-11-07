@@ -2,27 +2,21 @@
 
 package bui
 
-/*
-#include <stdlib.h>
-#include "bridge.h"
-*/
-import "C"
-
 import (
 	"errors"
 	"fmt"
-	"runtime/cgo"
-	"unsafe"
+
+	"github.com/CWBudde/bui-go/internal/engine"
 )
 
 // Node is one element of the kit's retained tree. All methods are UI-thread
-// only; see Do. A Node owns C memory: close the root of each tree when done,
+// only; see Do. A Node owns memory in the kit: close the root of each tree when done,
 // which closes its descendants too.
 type Node struct {
-	c        *C.BKNode
+	c        engine.Node
 	typ      string
-	handle   cgo.Handle
-	closing  bool     // Close was requested; the C node may still exist
+	id       uint32
+	closing  bool     // Close was requested; the kit's node may still exist
 	owner    *context // the live context this node is the root of
 	onClick  func()
 	onChange func(float64)
@@ -31,28 +25,29 @@ type Node struct {
 // NewNode creates a detached node of a kit type such as "frame", "button",
 // "label" or "slider". It panics on an unknown type.
 func NewNode(typ string) *Node {
-	cs := C.CString(typ)
-	defer C.free(unsafe.Pointer(cs))
-	c := C.BK_node_new(cs)
-	if c == nil {
+	c := kit.NodeNew(typ)
+	if c == 0 {
 		panic(fmt.Sprintf("bui: unknown node type %q", typ))
 	}
+
 	n := &Node{c: c, typ: typ}
-	n.handle = newHandle(n)
-	C.bui_node_set_handle(c, C.uintptr_t(n.handle))
+	n.id = newNodeID(n)
+	kit.NodeSetID(c, n.id)
+
 	return n
 }
 
-// live returns the C node, or panics instead of letting a dangling or NULL
-// pointer reach C.
-func (n *Node) live() *C.BKNode {
+// live returns the kit's node, or panics instead of letting a dangling or null
+// reference reach the kit.
+func (n *Node) live() engine.Node {
 	if n.closing {
 		panic(fmt.Sprintf("bui: use of closed %q node", n.typ))
 	}
+
 	return n.c
 }
 
-func (n *Node) closed() bool { return n.c == nil }
+func (n *Node) closed() bool { return n.c == 0 }
 
 // ErrUnknownProperty is returned (wrapped) by SetNum and SetStr for a key the kit does not know.
 var ErrUnknownProperty = errors.New("bui: unknown property")
@@ -61,57 +56,53 @@ var ErrUnknownProperty = errors.New("bui: unknown property")
 // A notifying key such as "set_value" runs handlers before SetNum returns.
 func (n *Node) SetNum(key string, v float64) error {
 	c := n.live()
-	ck := C.CString(key)
-	defer C.free(unsafe.Pointer(ck))
-	ok := C.BK_set_num(c, ck, C.double(v)) != 0
+	ok := kit.SetNum(c, key, v)
+
 	runDeferred()
+
 	if !ok {
 		return fmt.Errorf("%w: number property %q", ErrUnknownProperty, key)
 	}
+
 	return nil
 }
 
 // SetStr sets a string property. The error reports a key unknown to the kit.
 func (n *Node) SetStr(key, v string) error {
 	c := n.live()
-	ck, cv := C.CString(key), C.CString(v)
-	defer C.free(unsafe.Pointer(ck))
-	defer C.free(unsafe.Pointer(cv))
-	ok := C.BK_set_str(c, ck, cv) != 0
+	ok := kit.SetStr(c, key, v)
+
 	runDeferred()
+
 	if !ok {
 		return fmt.Errorf("%w: string property %q", ErrUnknownProperty, key)
 	}
+
 	return nil
 }
 
 // Num returns a number property, 0 for an unknown key.
 func (n *Node) Num(key string) float64 {
-	c := n.live()
-	ck := C.CString(key)
-	defer C.free(unsafe.Pointer(ck))
-	return float64(C.BK_get_num(c, ck))
+	return kit.GetNum(n.live(), key)
 }
 
 // Str returns a copy of a string property, "" for an unknown key.
 func (n *Node) Str(key string) string {
-	c := n.live()
-	ck := C.CString(key)
-	defer C.free(unsafe.Pointer(ck))
-	return C.GoString(C.BK_get_str(c, ck))
+	return kit.GetStr(n.live(), key)
 }
 
 // Add appends child to n, moving it from any parent it has. It panics if child is
 // n or an ancestor of n, as the kit would loop forever over the resulting cycle.
 func (n *Node) Add(child *Node) {
 	parent, c := n.live(), child.live()
-	for p := parent; p != nil; p = C.BK_node_parent(p) {
+	for p := parent; p != 0; p = kit.NodeParent(p) {
 		if p == c {
 			panic(fmt.Sprintf("bui: Add of a %q node to itself or a descendant", child.typ))
 		}
 	}
-	if C.BK_node_add(parent, c, -1) == 0 {
-		panic("bui: BK_node_add refused the node")
+
+	if !kit.NodeAdd(parent, c) {
+		panic("bui: the kit refused to add the node")
 	}
 }
 
@@ -149,11 +140,13 @@ type PackOptions struct {
 // get a zero rect and are not hit-testable.
 func (n *Node) Pack(o PackOptions) {
 	c := n.live()
-	C.BK_geom_set_manager(c, C.BK_GEOM_PACK)
+	kit.GeomSetPack(c)
+
 	expand := 0
 	if o.Expand {
 		expand = 1
 	}
+
 	for _, kv := range []struct {
 		key string
 		v   int
@@ -166,18 +159,14 @@ func (n *Node) Pack(o PackOptions) {
 		{"pady0", o.PadY0},
 		{"pady1", o.PadY1},
 	} {
-		ck := C.CString(kv.key)
-		C.BK_geom_set(c, ck, C.double(kv.v))
-		C.free(unsafe.Pointer(ck))
+		kit.GeomSet(c, kv.key, float64(kv.v))
 	}
 }
 
 // Rect returns the node's rectangle in raster pixels. Layout only runs while
 // rendering, so it is all zero before the first render.
 func (n *Node) Rect() (x, y, w, h int) {
-	var r [4]C.int
-	C.BK_node_rect(n.live(), &r[0])
-	return int(r[0]), int(r[1]), int(r[2]), int(r[3])
+	return kit.NodeRect(n.live())
 }
 
 // OnClick sets the handler for button clicks.
@@ -205,27 +194,31 @@ func (n *Node) Close() {
 	if n.closing {
 		return
 	}
+
 	if root := liveRootIn(n.c); root != nil {
 		panic(fmt.Sprintf("bui: Close of a %q node holding the root of a live Window or Headless", n.typ))
 	}
+
 	n.closing = true
 	closeOrDefer(n.free)
 }
 
 // liveRootIn finds a node in the subtree that a context not yet being closed still
 // uses as its root.
-func liveRootIn(c *C.BKNode) *Node {
-	if h := C.bui_node_handle(c); h != 0 {
-		n := nodeOf(h)
+func liveRootIn(c engine.Node) *Node {
+	if id := kit.NodeID(c); id != 0 {
+		n := nodes[id]
 		if n.owner != nil && !n.owner.closing {
 			return n
 		}
 	}
-	for i := range int(C.BK_node_child_count(c)) {
-		if root := liveRootIn(C.BK_node_child(c, C.int(i))); root != nil {
+
+	for i := range kit.NodeChildCount(c) {
+		if root := liveRootIn(kit.NodeChild(c, i)); root != nil {
 			return root
 		}
 	}
+
 	return nil
 }
 
@@ -234,26 +227,28 @@ func liveRootIn(c *C.BKNode) *Node {
 // children go first; the free then finds none of ours left. No kit call may be
 // on the stack.
 func (n *Node) free() {
-	if n.c == nil {
+	if n.c == 0 {
 		return
 	}
+
 	freeChildren(n.c)
 	c := n.c
-	n.c = nil
+	n.c = 0
 	n.closing = true
-	C.bui_node_set_handle(c, 0)
-	deleteHandle(n.handle)
-	C.BK_node_free(c)
+
+	kit.NodeSetID(c, 0)
+	delete(nodes, n.id)
+	kit.NodeFree(c)
 }
 
 // freeChildren walks back to front since each free detaches from the parent.
-// Kit-internal children have no handle and stay with the kit, which frees them
+// Kit-internal children have no id and stay with the kit, which frees them
 // with their parent, but our nodes below them still need freeing.
-func freeChildren(c *C.BKNode) {
-	for i := int(C.BK_node_child_count(c)) - 1; i >= 0; i-- {
-		child := C.BK_node_child(c, C.int(i))
-		if h := C.bui_node_handle(child); h != 0 {
-			nodeOf(h).free()
+func freeChildren(c engine.Node) {
+	for i := kit.NodeChildCount(c) - 1; i >= 0; i-- {
+		child := kit.NodeChild(c, i)
+		if id := kit.NodeID(child); id != 0 {
+			nodes[id].free()
 		} else {
 			freeChildren(child)
 		}

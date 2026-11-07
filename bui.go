@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-// Package bui is a Linux cgo spike of a Go binding to BUI's C kit.
+// Package bui is a Go binding to BUI's C kit, which provides Blender's UI widgets.
+//
+// Engines: on Linux amd64 with cgo it calls the kit natively. Everywhere else, and with
+// the build tag bui_nocgo, it runs the kit as an embedded WebAssembly module with no cgo:
+// with a real window on Linux through X11, and headless on other systems, where NewWindow
+// and Run report ErrNoDisplay. The API is the same, and the tests hold both engines to the
+// same pixels. Text typed on a real window can differ: the wasm engine's X11 host always
+// delivers UTF-8, while the native one gets non-ASCII keys in the C locale's encoding, as
+// nothing sets the locale. The README has the limits of each engine, and this project's
+// reading of what the wasm engine means for a binary's licence.
 //
 // Threading: Run must be called from the main goroutine, and all kit-touching
 // API is UI-thread only, meaning the main goroutine before and after Run, and
@@ -9,19 +18,12 @@
 // Do, the only function safe to call from anywhere.
 package bui
 
-/*
-#cgo CFLAGS: -I${SRCDIR}/include
-#cgo linux,amd64 LDFLAGS: -L${SRCDIR}/lib/linux_amd64 -lbui_kit -lbui_gpu -lbui_core -lstdc++ -ldl -lm -lpthread
-#include <stdlib.h>
-#include "bridge.h"
-*/
-import "C"
-
 import (
 	"errors"
 	"runtime"
 	"sync"
-	"unsafe"
+
+	"github.com/CWBudde/bui-go/internal/engine"
 )
 
 // init runs on the main goroutine; this keeps it on the main OS thread.
@@ -39,13 +41,16 @@ var (
 func Do(f func()) {
 	doMu.Lock()
 	defer doMu.Unlock()
+
 	doQueue = append(doQueue, f)
-	C.BK_window_wake()
+
+	host.Wake()
 }
 
 func pendingDo() int {
 	doMu.Lock()
 	defer doMu.Unlock()
+
 	return len(doQueue)
 }
 
@@ -56,17 +61,21 @@ func drainDo() {
 	queue := doQueue
 	doQueue = nil
 	doMu.Unlock()
+
 	next := 0
 	defer func() {
 		if next < len(queue) {
 			doMu.Lock()
+
 			doQueue = append(queue[next:], doQueue...)
 			doMu.Unlock()
 		}
 	}()
+
 	for next < len(queue) {
 		f := queue[next]
 		next++
+
 		f()
 	}
 }
@@ -74,22 +83,21 @@ func drainDo() {
 // EvalNumber evaluates a Blender-style number expression such as "2*pi". The
 // second result is false when the expression is invalid.
 func EvalNumber(expr string) (float64, bool) {
-	cs := C.CString(expr)
-	defer C.free(unsafe.Pointer(cs))
-	var v C.double
-	if C.BK_eval_number(cs, &v) == 0 {
-		return 0, false
-	}
-	return float64(v), true
+	return kit.EvalNumber(expr)
 }
 
 // ErrNoDisplay is returned when the kit cannot open a window system.
 var ErrNoDisplay = errors.New("bui: no display available")
 
+// ErrDisplayLost is returned by Run when the connection to the window system breaks. Every
+// window is closed by then, and later calls to Run and NewWindow report ErrNoDisplay. On
+// the native engine Xlib ends the process instead, with no chance to return this.
+var ErrDisplayLost = engine.ErrDisplayLost
+
 // Supported reports whether windows can be opened. It opens the display. It is
 // UI-thread only.
 func Supported() bool {
-	return C.BK_window_supported() != 0
+	return host.Supported()
 }
 
 // UI-thread state of the loop.
@@ -97,7 +105,8 @@ var inRun, inLoop, quitRequested bool
 
 // Run runs the message loop until Quit or until every window is closed. It must
 // be called from the main goroutine. It returns ErrNoDisplay without a window
-// system, leaving queued Do functions in place.
+// system, leaving queued Do functions in place, and ErrDisplayLost if the window
+// system goes away during the loop.
 //
 // A panic in a handler, or in a Do function running inside the loop, ends the
 // process, as it would abandon C frames. A Do function that Run itself drains
@@ -107,20 +116,27 @@ func Run() error {
 	if inRun || emitDepth > 0 {
 		panic("bui: Run called from inside Run or a handler")
 	}
+
 	if !Supported() {
 		return ErrNoDisplay
 	}
+
 	inRun = true
-	defer func() { inRun, inLoop = false, false }()
+	defer func() { inRun, inLoop, quitRequested = false, false, false }()
 	// Wakes sent before this were lost, so what they announced runs right here.
 	doMu.Lock()
-	C.bui_wake_init()
+	host.WakeInit(handleWake)
 	doMu.Unlock()
 	runDeferred()
 	drainDo()
+
+	var err error
+
 	if !quitRequested {
 		inLoop = true
-		C.BK_window_run()
+
+		err = host.Run()
+
 		inLoop = false
 	}
 	// The loop can end with work pending, such as a handler that closed a node
@@ -128,8 +144,8 @@ func Run() error {
 	// here on waits for the next Run.
 	runDeferred()
 	drainDo()
-	quitRequested = false
-	return nil
+
+	return err //nolint:wrapcheck // the exported ErrDisplayLost, as it is
 }
 
 // Quit ends the message loop. Outside the loop it makes the next Run return
@@ -138,22 +154,18 @@ func Run() error {
 // goroutines use Do(Quit).
 func Quit() {
 	if inLoop {
-		C.BK_window_quit()
+		host.Quit()
 		return
 	}
+
 	quitRequested = true
 }
 
-// buiGoWake is the loop's wake callback. It runs inside BK_window_run but outside
-// any kit call, so kit calls and destruction are allowed. Queued destruction goes
+// handleWake is the loop's wake callback. It runs inside the loop but outside any
+// kit call, so kit calls and destruction are allowed. Queued destruction goes
 // first: it was requested before anything these functions will do, and they flush
 // their own, as every binding call that can emit does.
-//
-//export buiGoWake
-func buiGoWake() {
-	returned := false
-	defer exitIfUnwinding(&returned)
+func handleWake() {
 	runDeferred()
 	drainDo()
-	returned = true
 }

@@ -1,0 +1,57 @@
+# Kit functions bui_kit.wasm exports, one per line; scripts/build-wasm.sh
+# passes each to wasm-ld as --export. wasm/shim.c exports its own functions
+# with export_name, and the reactor adds _initialize and memory.
+
+# memory for strings and out-parameters; wasm/compat.c exports malloc, past its --wrap
+free
+
+# nodes and properties
+BK_node_new
+BK_node_free
+BK_node_add
+BK_node_parent
+BK_node_child
+BK_node_child_count
+BK_node_rect
+BK_set_num
+BK_set_str
+BK_set_strs
+BK_get_num
+BK_get_str
+BK_geom_set_manager
+BK_geom_set
+BK_eval_number
+
+# contexts, rendering and input
+BK_context_new
+BK_context_free
+BK_render
+BK_press
+BK_release
+BK_motion
+BK_wheel
+BK_scroll
+BK_key
+BK_key_release
+BK_button
+BK_context_menu
+BK_timer
+BK_animating
+BK_needs_render
+BK_set_scale
+BK_image_poll
+
+# no Go API calls this yet (docs/design.md, images). TestImageStaysPendingWithoutThreads
+# does, as nothing else can start an image request.
+BK_node_set_image_source
+
+# rasters
+BUI_raster_create
+BUI_raster_free
+BUI_raster_pixels
+BUI_raster_width
+BUI_raster_height
+BUI_raster_damage
+
+# window host stubs (kit_window_null.c): the Go host replaces them
+BK_window_supported
