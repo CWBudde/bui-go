@@ -169,6 +169,21 @@ Baseline from 2026-11-07 (`bench/2026-11-07-05fdf4f.txt`; 200 iterations, three 
 Press and release in that benchmark are cheap because nothing renders in between: it measures the crossing into a handler and
 back, not a whole click as a user sees it.
 
+On arm64, from 2026-11-07 (`bench/2026-11-07-a06371a.txt`; Apple M5 Pro, macOS 27.2, Go 1.27.1, 200 iterations, three runs, load 4-5
+on 15 cores, medians):
+
+| Measurement                       | wasm compiler |
+| --------------------------------- | ------------- |
+| Render, counter 400x300           | 86 µs         |
+| Render, dense 1920x1080           | 4.4 ms        |
+| Hover and leave, counter          | 47 µs         |
+| Hover and leave, dense            | 47 µs         |
+| Press and release to a Go handler | 342 ns        |
+| `SetNum`                          | 85 ns         |
+
+There is no native column: the native engine needs Linux amd64, so this machine has no ratio. These numbers show the module's speed
+on arm64 and aren't comparable with the amd64 table, which is another CPU at another load.
+
 Hot calls do not allocate. `TestHotCallsDoNotAllocate` and `TestEmitDoesNotAllocate` hold it at 0 for input, render, properties
 and an emit with a call from its handler. `RasterDamage` allocates its result, once per damaged frame.
 
@@ -364,6 +379,25 @@ and the module's byte-identical rebuild.
   (1921 lines), the second through purego and the Objective-C runtime.
 - **A real pointer on a real desktop has not been tried.** Drawing, the `Do` ticker, resizing and the close button were checked on a
   real X session and window manager, through `xdotool windowsize` and `wmctrl -c`. Hovering and dragging were driven on Xvfb only.
+
+### On a MacBook
+
+On 2026-11-07, at `a06371a`, on an Apple M5 Pro with macOS 27.2, over SSH:
+
+- **`go test -count=1 ./...` passes** with and without cgo, on Go 1.27.1 and 1.26.8. All four runs had 329 passes, 54 skips and the
+  same skipped tests. The skips need a display or Xvfb, the opt-in `xdotool` run, a subprocess, or BUI's test images.
+- **Pixels match Linux amd64.** `TestGoldenPinned` runs here and passes against the hashes pinned on Linux amd64, and it fails when
+  the first or last of the 29 hashes is changed.
+- **A GUI program started over SSH reaches the logged-in session,** with the user logged in at the console. A small AppKit probe
+  listed its own window as on screen when started directly, even though `launchctl managername` says `Background`, and also through
+  `launchctl bootstrap gui/501` with a temporary plist. `launchctl asuser 501`, run as that user without `sudo`, fails with
+  "Operation not permitted" when switching audit session. Neither working method took focus from the user (`NSApp.isActive` stayed 0), as the probe is an
+  accessory app that orders itself front.
+- **With no permissions granted,** started either way, `CGPreflightScreenCaptureAccess` and `AXIsProcessTrusted` both return 0.
+  `screencapture -l` on the probe's own window fails with "could not create image from window", and a key event sent to its own pid
+  with `CGEventPostToPid` doesn't arrive. So Screen Recording is the likely need for screenshots, and Accessibility for synthetic
+  input. Neither has been run with a grant, so neither cause is confirmed. That also leaves open which process a grant attaches
+  to in each launch method, and whether it survives a rebuild of an unsigned binary.
 
 ## Known limits
 
