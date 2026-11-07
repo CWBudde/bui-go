@@ -1145,6 +1145,12 @@ func TestKitChildProcess(t *testing.T) {
 		defer func() { _ = recover() }()
 
 		switch child {
+		case "kit-out-of-memory":
+			// The string fits the scratch buffer, once. The kit's own copy of it does not.
+			m := smallModule(t)
+			k := Kit{m: m}
+			n := k.NodeNew("label")
+			k.SetStr(n, "description", strings.Repeat("x", 1200*1024))
 		case "trap":
 			m := loadForTest(t, options{cacheDir: sharedCache, memoryLimitPages: memoryLimitPages})
 			Kit{m: m}.NodeChildCount(outOfRange)
@@ -1208,6 +1214,7 @@ func TestKitFatalPathsExit(t *testing.T) {
 		{"missing-export", `no export "BK_node_free"`},
 		{"malloc-fails", "out of memory"},
 		{"malloc-fails-for-small-scratch", "out of memory"},
+		{"kit-out-of-memory", "the wasm kit ran out of memory"},
 	} {
 		t.Run(tc.child, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], "-test.run=^TestKitChildProcess$", "-test.count=1")

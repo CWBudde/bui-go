@@ -2,8 +2,7 @@
 # passes each to wasm-ld as --export. wasm/shim.c exports its own functions
 # with export_name, and the reactor adds _initialize and memory.
 
-# memory for strings and out-parameters
-malloc
+# memory for strings and out-parameters; wasm/compat.c exports malloc, past its --wrap
 free
 
 # nodes and properties

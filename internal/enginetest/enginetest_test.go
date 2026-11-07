@@ -19,3 +19,5 @@ func TestConformanceCgo(t *testing.T) {
 func TestGoldenCgoAgainstWasm(t *testing.T) {
 	Golden(t, cgoengine.Kit{}, wasmengine.Kit{})
 }
+
+func BenchmarkCgo(b *testing.B) { benchmarks(b, cgoengine.Kit{}) }

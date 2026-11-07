@@ -131,7 +131,9 @@ while read -r sym; do
 	exports+=("-Wl,--export=$sym")
 done <"$root/wasm/exports.txt"
 
+# wasm/compat.c defines the wrappers, so they are the kit's alone, not the probe's.
 "$cxx" -O2 "${link_flags[@]}" "${exports[@]}" \
+	-Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc \
 	"$build/obj/shim.o" "$build/obj/compat.o" \
 	"$build/cmake/kit/libbui_kit.a" "$build/cmake/gpu/libbui_gpu.a" "$build/cmake/core/libbui_core.a" \
 	-lunwind -o "$out/bui_kit.wasm"
