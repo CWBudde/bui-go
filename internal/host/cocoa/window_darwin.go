@@ -30,6 +30,7 @@ type window struct {
 	host   *Host
 	id     engine.Window
 	nswin  objc.ID // 0 once closed
+	owned  objc.ID // the same window, which this holds a reference to until WindowFree
 	layer  objc.ID
 	ctx    engine.Context
 	raster engine.Raster
@@ -143,7 +144,7 @@ func (win *window) create(title string, width, height int) {
 	view.Send(selRelease)
 	ns.Send(selCenter)
 
-	win.nswin, win.layer = ns, layer
+	win.nswin, win.owned, win.layer = ns, ns, layer
 	win.syncSize()
 }
 
@@ -180,7 +181,12 @@ func (h *Host) find(id engine.Window) *window {
 // spike's tests leave the user's focus alone. The port has to, as the C host does.
 func (h *Host) WindowShow(id engine.Window) {
 	if win := h.find(id); win != nil && win.nswin != 0 {
+		// Ordering a window front autoreleases references to it, and nothing else would
+		// drain them outside the loop: the window would outlive WindowFree.
+		pool := poolPush()
+
 		win.nswin.Send(selOrderFront)
+		poolPop(pool)
 
 		win.full, win.renderPending = true, true
 	}
@@ -193,12 +199,14 @@ func (h *Host) WindowFree(id engine.Window) {
 		return
 	}
 
-	if win.nswin != 0 {
-		pool := poolPush()
+	pool := poolPush()
 
+	if win.nswin != 0 {
 		win.nswin.Send(selClose)
-		poolPop(pool)
 	}
+
+	win.owned.Send(selRelease)
+	poolPop(pool)
 
 	h.kit.ContextSetEmitHost(win.ctx)
 	h.kit.RasterFree(win.raster)

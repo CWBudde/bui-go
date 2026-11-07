@@ -144,11 +144,17 @@ func (h *Host) turn() {
 	pool := poolPush()
 	defer poolPop(pool)
 
-	h.pump(h.untilDate())
-
-	// In this order, so that a wake landing in between is either seen here or posts again.
-	// Resetting on every turn also survives a nested AppKit loop eating the event.
+	// A loop nested in a callback may have taken the posted event, so nothing says it is
+	// still queued. Clear the flag before looking at wakeWanted: a wake landing later posts
+	// again and ends the wait, and one landing earlier is seen here and skips the wait.
 	h.wakePosted.Store(false)
+
+	until := objc.ID(0)
+	if !h.wakeWanted.Load() {
+		until = h.untilDate()
+	}
+
+	h.pump(until)
 
 	if h.wakeWanted.Swap(false) {
 		h.drainWake()
@@ -165,7 +171,7 @@ func (h *Host) turn() {
 	h.renderPending(now)
 }
 
-// pump waits for an event until the date, then handles what is queued. nil is not a date.
+// pump waits for an event until the date, then handles what is queued. A nil date doesn't wait.
 func (h *Host) pump(until objc.ID) {
 	ev := h.app.Send(selNextEvent, eventMaskAny, until, nsDefaultRunLoopMode, true)
 
