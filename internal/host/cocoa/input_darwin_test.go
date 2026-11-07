@@ -40,6 +40,7 @@ const (
 	fieldMomentum  = 123
 	phaseBegan     = 1
 	phaseChanged   = 2
+	phaseEnded     = 4
 	childEnv       = "BUI_COCOA_TEST_CHILD"
 )
 
@@ -500,6 +501,27 @@ func TestTrackpadScroll(t *testing.T) {
 
 		if v := f.k.GetNum(f.child, "value"); v != stepped {
 			t.Errorf("momentum after a key press moved the value from %v to %v", stepped, v)
+		}
+
+		// A key pressed during the gesture: the gesture's end comes before its momentum.
+		f.scroll(x, y, scrollUnitPx, 15, 0, flagControl, phaseBegan, 0)
+
+		stepped = f.k.GetNum(f.child, "value")
+		f.key(keyA, "a", 0)
+		f.scroll(x, y, scrollUnitPx, 0, 0, flagControl, phaseEnded, 0)
+		f.scroll(x, y, scrollUnitPx, 50, 0, flagControl, 0, phaseChanged)
+
+		if v := f.k.GetNum(f.child, "value"); v != stepped {
+			t.Errorf("momentum after a key pressed during the gesture moved the value from %v to %v", stepped, v)
+		}
+
+		// The next gesture's momentum scrolls again.
+		f.scroll(x, y, scrollUnitPx, 0, 0, flagControl, phaseBegan, 0)
+		f.scroll(x, y, scrollUnitPx, 0, 0, flagControl, phaseEnded, 0)
+		f.scroll(x, y, scrollUnitPx, 50, 0, flagControl, 0, phaseChanged)
+
+		if v := f.k.GetNum(f.child, "value"); v == stepped {
+			t.Errorf("momentum of a new gesture left the value at %v", v)
 		}
 	})
 }

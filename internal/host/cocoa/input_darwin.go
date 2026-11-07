@@ -230,11 +230,14 @@ func (win *window) scrollWheel(ev objc.ID) {
 	phase := objc.Send[uint64](ev, selPhase)
 
 	// Momentum after a key press would turn into another action, such as Ctrl and scroll.
-	if momentum != 0 {
-		if h.ignoreMomentum {
-			return
-		}
-	} else {
+	// Only a new gesture or a wheel clears this: the event that ends a gesture comes before
+	// its momentum, so the C host, which clears it on any event without momentum, lets the
+	// momentum through after a key pressed during the gesture.
+	const phaseBegan = 1
+	switch {
+	case momentum != 0 && h.ignoreMomentum:
+		return
+	case momentum == 0 && (phase == 0 || phase == phaseBegan):
 		h.ignoreMomentum = false
 	}
 
@@ -247,7 +250,6 @@ func (win *window) scrollWheel(ev objc.ID) {
 		return
 	}
 
-	const phaseBegan = 1
 	if phase == phaseBegan {
 		win.scrollX, win.scrollY = 0, 0
 	}

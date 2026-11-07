@@ -455,11 +455,15 @@ events, cursors, `Warp` and the clipboard. Command maps to Ctrl, as Blender's ma
   which a test app can't have: tests run under the prohibited activation policy, as anything else comes to the front by itself
   once it waits for events, and took focus from the user's editor for seconds during a run. A middle button and scrolling go to the
   view directly, as `NSEvent` can't make them for a window.
-- **Each test fails when its handler is broken.** All 45 handler breaks tried failed their test, run on the MacBook.
+- **Each test fails when its handler is broken.** All 47 handler breaks tried failed their test, run on the MacBook.
 - **What tests don't reach:** the real clipboard (they use a private pasteboard), a real warp, which would move the user's pointer,
   `pressedMouseButtons`, and activation, which the tests turn off. A hand on the MacBook is the check left for those.
-- **One change from the C host:** BUI clamps the cursor to 0-7, which hides the pointer for `BK_CURSOR_NESW` and everything after
-  it. Here those show the arrow, or `operationNotAllowedCursor` for `BK_CURSOR_NOT_ALLOWED`.
+- **Two changes from the C host:**
+  - BUI clamps the cursor to 0-7, which hides the pointer for `BK_CURSOR_NESW` and everything after it. Here those show the
+    arrow, or `operationNotAllowedCursor` for `BK_CURSOR_NOT_ALLOWED`.
+  - Trackpad momentum after a key press is dropped until the next gesture or wheel event. BUI clears that on any event without
+    momentum, which includes the event ending the gesture, so momentum after a key pressed during the gesture still scrolls,
+    with the new modifier.
 - **As in the C and X11 hosts:** a window freed inside one of its own events is released between loop turns, and a panic in a
   handler ends the process.
 - **Still missing:** a menu and Cmd+Q, live resize, scale changes between screens, IME, and the leaks above.
