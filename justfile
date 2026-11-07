@@ -1,6 +1,9 @@
 # bui-go justfile
 
+# Keep in sync with .github/workflows/test-lint.yaml. The lint recipes run exactly this version,
+# so a different golangci-lint on PATH cannot give a local result that differs from CI.
 golangci_lint_version := "2.15.0"
+golangci_lint := "go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v" + golangci_lint_version
 
 # Install development dependencies (formatters and linters)
 setup-deps:
@@ -11,7 +14,6 @@ setup-deps:
     command -v gofumpt >/dev/null 2>&1 || { echo "Installing gofumpt..."; go install mvdan.cc/gofumpt@v0.12.0; }
     command -v gci >/dev/null 2>&1 || { echo "Installing gci..."; go install github.com/daixiang0/gci@v0.14.0; }
     command -v shfmt >/dev/null 2>&1 || { echo "Installing shfmt..."; go install mvdan.cc/sh/v3/cmd/shfmt@v3.14.1; }
-    golangci-lint version 2>/dev/null | grep -qF 'version {{golangci_lint_version}} ' || { echo "Installing golangci-lint v{{golangci_lint_version}}..."; go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v{{golangci_lint_version}}; }
     command -v shellcheck >/dev/null 2>&1 || echo "WARNING: shellcheck not found. Install it with your package manager."
     echo "Ensure $(go env GOPATH)/bin is in your PATH"
 
@@ -23,11 +25,11 @@ fmt:
 
 # Run linter
 lint:
-    golangci-lint run --config ./.golangci.toml --timeout 5m
+    {{golangci_lint}} run --config ./.golangci.toml --timeout 5m
 
 # Run linter (with fix)
 lint-fix:
-    golangci-lint run --config ./.golangci.toml --timeout 5m --fix
+    {{golangci_lint}} run --config ./.golangci.toml --timeout 5m --fix
 
 # Format and fix lint issues
 fix: lint-fix fmt
