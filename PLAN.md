@@ -53,8 +53,9 @@ CI only proves that the package passes on `macos-latest`. This phase adds checks
 - [ ] List the macOS permissions tests need: Screen Recording for screenshots, Accessibility for synthetic input. Christian grants
       these in System Settings. An agent must not change them. (2026-11-07) — partial: without grants, both preflights return 0,
       capturing the probe's own window fails, and a key event to its own pid doesn't arrive. What remains is below.
-- [ ] Rerun the permission probe once Christian has granted both permissions, to confirm each one fixes its failure, which process
-      each grant attaches to (direct and `launchctl bootstrap`), and whether it survives a rebuild of an unsigned binary.
+- [ ] Rerun the permission probe from a binary at a stable path once Christian has granted it both permissions, to confirm each one
+      fixes its failure, which process each grant attaches to (direct and `launchctl bootstrap`), and whether it survives a rebuild
+      (compare `codesign -dvvv` code hashes). A first grant, to a build since deleted, didn't reach a rebuild in a new directory.
 
 The module itself still gets built on Linux only, because only the Linux x86_64 wasi-sdk is pinned.
 

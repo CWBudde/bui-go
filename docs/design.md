@@ -397,7 +397,11 @@ On 2026-11-07, at `a06371a`, on an Apple M5 Pro with macOS 27.2, over SSH:
   `screencapture -l` on the probe's own window fails with "could not create image from window", and a key event sent to its own pid
   with `CGEventPostToPid` doesn't arrive. So Screen Recording is the likely need for screenshots, and Accessibility for synthetic
   input. Neither has been run with a grant, so neither cause is confirmed. That also leaves open which process a grant attaches
-  to in each launch method, and whether it survives a rebuild of an unsigned binary.
+  to in each launch method.
+- **A grant may not survive a rebuild.** After the user granted access to one build of the probe, which was then deleted, a rebuild
+  from the same source in a new directory still got 0 from both preflights, started either way. The probe is ad-hoc signed. Which
+  permission that grant covered wasn't recorded, and neither was whether the two builds had the same code hash, so this isn't yet
+  a cause. Plan for tests to need a stable binary, or a new grant after each rebuild, until a rerun shows otherwise.
 
 ## Known limits
 
