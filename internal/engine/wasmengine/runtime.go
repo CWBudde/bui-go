@@ -99,7 +99,7 @@ func mustLoad(bin []byte, o options) *module {
 // wazero fails the compile if the cache cannot be read or written, not just when
 // it cannot be opened. So any failure with a cache is retried without one.
 func load(bin []byte, o options) (*module, error) {
-	ctx := experimental.WithCompilationWorkers(context.Background(), min(maxCompileWorkers, runtime.NumCPU()))
+	ctx := experimental.WithCompilationWorkers(context.Background(), compileWorkers())
 
 	if o.cacheDir != "" {
 		cache, err := wazero.NewCompilationCacheWithDir(o.cacheDir)
@@ -114,6 +114,12 @@ func load(bin []byte, o options) (*module, error) {
 	}
 
 	return instantiate(ctx, bin, o, nil)
+}
+
+// compileWorkers follows GOMAXPROCS, not the CPU count: more workers than that add
+// no parallelism, only the memory each one compiles with.
+func compileWorkers() int {
+	return min(maxCompileWorkers, runtime.GOMAXPROCS(0))
 }
 
 func instantiate(ctx context.Context, bin []byte, o options, cache wazero.CompilationCache) (*module, error) {

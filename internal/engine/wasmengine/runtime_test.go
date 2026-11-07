@@ -315,6 +315,20 @@ func TestCacheIsReusedAndFailuresFallBack(t *testing.T) {
 	})
 }
 
+func TestCompileWorkersFollowGOMAXPROCS(t *testing.T) {
+	t.Cleanup(func(saved int) func() {
+		return func() { runtime.GOMAXPROCS(saved) }
+	}(runtime.GOMAXPROCS(0)))
+
+	for _, tc := range []struct{ procs, want int }{{1, 1}, {2, 2}, {maxCompileWorkers, maxCompileWorkers}, {64, maxCompileWorkers}} {
+		runtime.GOMAXPROCS(tc.procs)
+
+		if got := compileWorkers(); got != tc.want {
+			t.Errorf("GOMAXPROCS %d: %d workers, want %d", tc.procs, got, tc.want)
+		}
+	}
+}
+
 func TestMemoryLimit(t *testing.T) {
 	if got := defaultOptions().memoryLimitPages; got != memoryLimitPages {
 		t.Fatalf("default limit = %d pages, want %d", got, memoryLimitPages)
