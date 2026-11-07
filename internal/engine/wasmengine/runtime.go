@@ -67,29 +67,45 @@ type module struct {
 	cache   wazero.CompilationCache
 	mod     api.Module
 	emit    engine.EmitFunc
+
+	// levels and depth are the export calls in progress: see level.
+	levels []*level
+	depth  int
 }
 
 var (
 	loadOnce sync.Once
 	loaded   *module
+	// loadedEmit is what SetEmit got for the process's module, which it must not
+	// load: package bui calls it at init.
+	loadedEmit engine.EmitFunc
 )
 
 // get returns the process's module, loading it on first use, so that importing
 // this package costs nothing until then.
 func get() *module {
-	loadOnce.Do(func() { loaded = mustLoad(kitModule, defaultOptions()) })
+	loadOnce.Do(func() {
+		loaded = mustLoad(kitModule, defaultOptions())
+		loaded.emit = loadedEmit
+	})
 
 	return loaded
 }
 
-// mustLoad ends the process on failure. A bindings call has no way to report one,
-// and the embedded module loading is not something a caller can work around. It
-// is os.Exit and not a panic so that no recover can carry on without a kit.
+// fatalf ends the process. A kit call has no way to report a failure, and after a
+// trap the C state is unknown. It is os.Exit and not a panic so that no recover,
+// neither a caller's nor wazero's around host functions, can carry on.
+func fatalf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "bui: "+format+"\n", args...)
+	os.Exit(2)
+}
+
+// mustLoad ends the process on failure: the embedded module loading is not
+// something a caller can work around.
 func mustLoad(bin []byte, o options) *module {
 	m, err := load(bin, o)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "bui: cannot load the wasm kit: %v\n", err)
-		os.Exit(2)
+		fatalf("cannot load the wasm kit: %v", err)
 	}
 
 	return m

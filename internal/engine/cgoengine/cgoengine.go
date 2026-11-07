@@ -122,6 +122,20 @@ func (Kit) SetStr(n engine.Node, key, v string) bool {
 	return C.BK_set_str(node(n), ck, cv) != 0
 }
 
+// SetStrs implements engine.Kit. The slice is Go memory holding only C pointers,
+// which cgo allows.
+func (Kit) SetStrs(n engine.Node, key string, vs []string) bool {
+	ck, free := cstr(key)
+	defer free()
+	cvs := make([]*C.char, len(vs))
+	for i, v := range vs {
+		cv, freeValue := cstr(v)
+		defer freeValue()
+		cvs[i] = cv
+	}
+	return C.BK_set_strs(node(n), ck, unsafe.SliceData(cvs), C.int(len(cvs))) != 0
+}
+
 // GetNum implements engine.Kit.
 func (Kit) GetNum(n engine.Node, key string) float64 {
 	ck, free := cstr(key)
@@ -164,6 +178,17 @@ func (Kit) RasterNew(w, h int) engine.Raster {
 
 // RasterFree implements engine.Kit.
 func (Kit) RasterFree(r engine.Raster) { C.BUI_raster_free(raster(r)) }
+
+// RasterPixels implements engine.Kit.
+func (Kit) RasterPixels(r engine.Raster) []uint32 {
+	c := raster(r)
+	n := int(C.BUI_raster_width(c)) * int(C.BUI_raster_height(c))
+	pixels := C.BUI_raster_pixels(c)
+	if pixels == nil || n == 0 {
+		return nil
+	}
+	return append([]uint32(nil), unsafe.Slice((*uint32)(unsafe.Pointer(pixels)), n)...)
+}
 
 // Render implements engine.Kit.
 func (Kit) Render(ctx engine.Context, r engine.Raster, w, h int) {
