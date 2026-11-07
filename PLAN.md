@@ -9,6 +9,7 @@ Open work for bui-go, as of 2026-11-07. Finished work belongs in `docs/design.md
 - BUI's owner wants the binding in-tree at `bindings/go`. We asked four questions on
   [BUI#8](https://github.com/ppmpreetham/BUI/issues/8#issuecomment-6707514269), about the committed wasm, the second X11 host,
   pinning and tags. **There is no answer yet, and Phase 3 depends on it.**
+- [bui-go#9](https://github.com/CWBudde/bui-go/pull/9) is merged, so `main` has the macOS baseline.
 - A trial bump to BUI `bca7b8d` worked: the wasm built unmodified, reproduced byte for byte, and passed without cgo with the golden
   hashes unchanged. With cgo, only `TestNoDisplay` failed (see Phase 0).
 
@@ -66,20 +67,31 @@ the full port until the owner has answered.
 
 **Spike, in a time-boxed branch:**
 
-- [ ] Decide how permission tests get a fixed binary, because `go test` builds a new one each time and each new binary loses its
-      grants: for example `go test -c` to a fixed path run as an agent, or a real signing identity, which is untried.
-- [ ] Add `github.com/ebitengine/purego` and check that the cross-build from Linux with `CGO_ENABLED=0` still works.
-- [ ] Pin AppKit to the main thread. Run it from `init` with `runtime.LockOSThread`, and check that this fits `Do`, `Wake` and the
-      kit's calling rules in `engine.Host`.
-- [ ] Open a window and present a `Headless`-sized raster through `CGImage` or a layer, at Retina scale.
-- [ ] Measure the frame time against the X11 host at the same window size.
+- [x] Decide how permission tests get a fixed binary, because `go test` builds a new one each time and each new binary loses its
+      grants: for example `go test -c` to a fixed path run as an agent, or a real signing identity, which is untried. (2026-11-07) —
+      a small fixed helper holds the grant and runs as an agent, so the program under test can be rebuilt freely. Shown for screenshots;
+      synthetic input hasn't been tried this way, and neither has a signing identity.
+- [x] Add `github.com/ebitengine/purego` and check that the cross-build from Linux with `CGO_ENABLED=0` still works. (2026-11-07) —
+      v0.11.3. All six targets build, and test binaries built on Linux run on the Mac.
+- [x] Pin AppKit to the main thread. Run it from `init` with `runtime.LockOSThread`, and check that this fits `Do`, `Wake` and the
+      kit's calling rules in `engine.Host`. (2026-11-07) — it fits, using a pull loop. `TestWakeEndsABlockedWaitWithGC` passes, and
+      `examples/counter` ticks through `bui.Do`.
+- [x] Open a window and present a `Headless`-sized raster through `CGImage` or a layer, at Retina scale. (2026-11-07) — a `CGImage` in
+      a layer. A capture of the window is 640x376 for 320x188, and `TestLayerHoldsTheRaster` matches every pixel.
+- [x] Measure the frame time against the X11 host at the same window size. (2026-11-07) — about 1.6x X11's, on different machines:
+      5.4 ms against 3.4 ms at 1080p, 420 µs against 241-310 µs for the counter window.
 
 Continue only if a window draws correctly and the frame time is close to X11's. Otherwise, record why in `docs/design.md` and stop.
+
+The window draws correctly. Whether 1.6x counts as close is Christian's call; the recommendation is yes, as a 1080p frame stays near
+10 ms. The numbers are in "The Cocoa spike" in `docs/design.md`.
 
 **Port, if the spike passes:**
 
 - [ ] `internal/host/cocoa` implementing `engine.Host`, with `host_darwin.go` and `host_none.go` narrowed to the remaining platforms.
 - [ ] Mouse, scroll, keyboard and text input, resize, close, `Do` wakes and the clipboard, tested in the same areas as the X11 host.
+- [ ] From the spike: live resize (AppKit's nested loop), scale changes between screens, activation, a real click on the close button,
+      and the layer and delegate leaked once per window.
 - [ ] A test job on `macos-latest` for whatever works without a logged-in session, plus a documented manual run on the MacBook.
 - [ ] Update the README's platform table and "What has been run" in `docs/design.md`.
 

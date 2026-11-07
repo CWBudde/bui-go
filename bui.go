@@ -4,9 +4,10 @@
 //
 // Engines: on Linux amd64 with cgo it calls the kit natively. Everywhere else, and with
 // the build tag bui_nocgo, it runs the kit as an embedded WebAssembly module with no cgo:
-// with a real window on Linux through X11, and headless on other systems, where NewWindow
-// and Run report ErrNoDisplay. The API is the same, and the tests hold both engines to the
-// same pixels. Text typed on a real window can differ: the wasm engine's X11 host always
+// with a real window on Linux through X11, a window without input on macOS, and headless on
+// other systems, where NewWindow and Run report ErrNoDisplay. The API is the same, and the
+// tests hold both engines to the same pixels. Text typed on a real window can differ: the
+// wasm engine's X11 host always
 // delivers UTF-8, while the native one gets non-ASCII keys in the C locale's encoding, as
 // nothing sets the locale. The README has the limits of each engine, and this project's
 // reading of what the wasm engine means for a binary's licence.

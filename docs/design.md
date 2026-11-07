@@ -375,8 +375,9 @@ on macOS and Linux arm64 (which select the wasm engine), a cross-build without c
 and the module's byte-identical rebuild.
 
 - **Windows is built, not run.**
-- **Windows and macOS have no window host.** They would be ports of `kit_window_win32.c` (987 lines) and `kit_window_cocoa.m`
-  (1921 lines), the second through purego and the Objective-C runtime.
+- **Windows has no window host.** It would be a port of `kit_window_win32.c` (987 lines).
+- **macOS has only a spike of a window host,** described under "The Cocoa spike". A full port of `kit_window_cocoa.m` (1921 lines) is
+  held until BUI's owner answers on [BUI#8](https://github.com/ppmpreetham/BUI/issues/8).
 - **A real pointer on a real desktop has not been tried.** Drawing, the `Do` ticker, resizing and the close button were checked on a
   real X session and window manager, through `xdotool windowsize` and `wmctrl -c`. Hovering and dragging were driven on Xvfb only.
 
@@ -403,6 +404,43 @@ On 2026-11-07, at `a06371a`, on an Apple M5 Pro with macOS 27.2, over SSH:
   with a different hash at the granted path, and it came back when the granted binary was restored. Rebuilding the same source in
   another directory also changed the hash. `go test` builds a new binary each time, so tests that need a permission need a fixed
   binary and a new grant whenever it changes. Whether a real signing identity avoids that hasn't been tried.
+
+### The Cocoa spike
+
+On 2026-11-07, on the same MacBook. `internal/host/cocoa` is about 750 lines of Go through purego and the Objective-C runtime, built
+with `CGO_ENABLED=0`. It opens a window and presents the raster, and it has no input, activation, menu, cursors or clipboard.
+
+- **The window draws correctly.** A build of `examples/counter` made on Linux, captured on screen twice, shows a 320x188 window as
+  640x376 pixels, with sharp text, upright, in the right colours, and the label moved from "Running for 3 s" to "Running for 9 s". That
+  was checked by eye. `TestLayerHoldsTheRaster` compares exactly: all 480,000 pixels of the layer match the raster, and 244 of 600 rows
+  differ when it is flipped.
+- **It presents through a layer.** Each frame is copied into a `CFData` and wrapped in a `CGImage`, which is set as the contents of a
+  layer-hosting view, with animations off.
+- **The loop fits the main thread.** Package `bui` already locks its `init` to the main thread, and the host pulls events with
+  `nextEventMatchingMask:` rather than `[NSApp run]`, as the X11 host does with its socket. `Wake` works from any goroutine:
+  500 round trips against a blocked loop, with collections forced, took 51-86 µs on average, and the slowest took 199 µs to 4 ms.
+- **Frame time is about 1.6x X11's,** but on different machines, so this is only a rough comparison. Memory grew by 1.7 MB between
+  2000 and 6000 presents, so there is no frame-sized leak.
+
+  | Present        | Cocoa, M5 Pro, load 11-16       | X11 on Xvfb, i7-1255U, load 3 |
+  | -------------- | ------------------------------- | ----------------------------- |
+  | Counter window | 419-424 µs                      | 241-310 µs                    |
+  | 1920x1080      | 5.38-6.77 ms (median about 5.4) | 3.3-3.47 ms                   |
+
+  With the 4.4 ms dense render, a 1080p frame costs about 10 ms, under the 16 ms of 60 Hz. The clock stops when Core Animation is
+  handed the frame, and the window server draws later, so this isn't time to screen.
+
+- **Every darwin build changes.** purego brings its own `fakecgo`, also for programs that only use `Headless`, and `counter` grows by
+  0.77 MB, from 11.23 to 12.00 MB.
+- **Tests with screenshots don't need a grant on the program under test.** The grant sits on a small fixed helper, run as an agent,
+  that captures the program's window. `counter` was rebuilt just before the capture and still worked. Synthetic input hasn't been
+  tried this way.
+- **Other tests:** with this host, `go test -count=1 -v ./...` has 334 passes, 54 skips and no failures on Go 1.27.1 and 1.26.8, with and
+  without cgo. `-race` on the package passes with cgo, and a cross-build without cgo works for Linux, Windows and macOS on amd64 and arm64.
+
+**Not tried:** a click on the real close button (`TestCloseEndsRun` closes it from code), dragging a window's edge, whose nested
+AppKit loop the host doesn't handle yet, moving between screens of different scale, and activation. The layer and the delegate are
+each leaked once per window.
 
 ## Known limits
 
