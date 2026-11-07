@@ -7,13 +7,49 @@ library. This is an independent project, not part of BUI.
 
 ## Try it
 
-You need Go 1.26 or newer. With no C toolchain, and on any platform for headless use:
+You need Go 1.26 or newer, and no C toolchain. On Linux, with an X server or XWayland, this opens a real window from a static
+binary:
 
 ```sh
 CGO_ENABLED=0 go run ./examples/counter
 ```
 
-On Linux that opens a real window through X11 or XWayland, as a static binary.
+On Windows and macOS that example exits with `ErrNoDisplay`, as they have no window host yet. Drive the tree with `Headless`
+instead, which renders into memory and takes synthetic input. It works on Linux too, also with no display. In a module that
+requires `github.com/CWBudde/bui-go`, this prints `clicked`:
+
+```go
+package main
+
+import (
+	"fmt"
+
+	bui "github.com/CWBudde/bui-go"
+)
+
+func main() {
+	root := bui.NewNode("frame")
+	defer root.Close()
+
+	button := bui.NewNode("button")
+	button.SetStr("text", "Add step")
+	root.Add(button)
+	button.Pack(bui.PackOptions{Fill: bui.FillX})
+	button.OnClick(func() { fmt.Println("clicked") })
+
+	view := bui.NewHeadless(root, 320, 120)
+	defer view.Close()
+
+	view.Render() // lays out the tree, so Rect is valid from here on
+	x, y, w, h := button.Rect()
+	view.Press(x+w/2, y+h/2)
+	view.Release(x+w/2, y+h/2)
+}
+```
+
+CI runs the tests on macOS, but only cross-builds for Windows, so that platform is untested.
+
+In a window program, the same calls look like this:
 
 ```go
 button := bui.NewNode("button")
