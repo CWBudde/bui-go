@@ -138,24 +138,28 @@ CI runs the same checks and more (`.github/workflows/test.yaml`).
 
 ## Licence and source of the binaries
 
+The licence statements in this section are the project's own reading of the licences involved. They have had no legal review
+and are not legal advice, so check them for your own case before you distribute a program built on bui-go.
+
 This repository is GPL-2.0-or-later, matching the SPDX headers in BUI's source. Its `LICENSE` file is copied from BUI and
-contains the GPLv3 text. A program that links this package must comply with the GPL.
+contains the GPLv3 text. We read the GPL as applying to a program that links this package.
 
-**A binary with the wasm engine is distributed under GPLv3,** not GPLv2: it includes wazero, which is Apache-2.0, and that
-licence is compatible with GPLv3 only. This is the "or later" in BUI's licence at work. [`NOTICES.md`](NOTICES.md) lists the
-third-party parts and their licences.
+**We read a binary with the wasm engine as distributable under GPLv3,** not GPLv2: it includes wazero, which is Apache-2.0, and
+as we understand it that licence is compatible with GPLv3 but not with GPLv2. BUI's "or later" is what leaves GPLv3 open.
+[`NOTICES.md`](NOTICES.md) lists the third-party parts and their licences, and [`licenses/`](licenses) holds the texts.
 
-The corresponding source of the committed binaries is:
+We offer the following as the corresponding source of the committed binaries:
 
-- `lib/linux_amd64/`, static libraries including the FreeType, libjpeg-turbo, libwebp and Wuffs code vendored in BUI's tree:
-  BUI at the commit in [`BUI_COMMIT`](BUI_COMMIT), built by `scripts/build-kit.sh`.
+- `lib/linux_amd64/`, static libraries including the FreeType, stb_truetype, NanoSVG, libjpeg-turbo, libwebp and Wuffs code
+  vendored in BUI's tree: BUI at the commit in [`BUI_COMMIT`](BUI_COMMIT), built by `scripts/build-kit.sh`.
 - `internal/engine/wasmengine/bui_kit.wasm`, and the test's `sjlj_probe.wasm`: the same BUI commit, `wasm/` in this
-  repository, and wasi-sdk 34.0, whose version and checksum are in `scripts/build-wasm.sh`, which builds them.
+  repository, and wasi-sdk 34.0, whose version and checksum are in `scripts/build-wasm.sh`, which builds them. `NOTICES.md`
+  names the wasi-libc and LLVM commits that wasi-sdk release pins.
 
 ```sh
 scripts/build-kit.sh
 scripts/build-wasm.sh
 ```
 
-Build paths are stripped from the output, so rebuilds on the same toolchain from another directory are byte-identical. CI
-rebuilds the module and requires identical bytes.
+Build paths are stripped from the output. The wasm modules rebuild byte-identically from another directory, and CI rebuilds the
+main module and requires identical bytes. No such check covers `lib/`, which is built with the local C toolchain.
