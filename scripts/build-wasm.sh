@@ -3,9 +3,11 @@
 #
 # Builds BUI's C kit at the commit pinned in BUI_COMMIT as a WebAssembly
 # reactor module for wazero (PLAN.md, "a cgo-free path"), with a pinned
-# wasi-sdk. Outputs, all under the gitignored build/wasm/out:
+# wasi-sdk. Outputs, under the gitignored build/wasm/out:
 #
-#   bui_kit.wasm     kit + gpu + core + wasm/shim.c, exports in wasm/exports.txt
+#   bui_kit.wasm     kit + gpu + core + wasm/shim.c, exports in wasm/exports.txt;
+#                    also copied to internal/engine/wasmengine, where it is
+#                    committed and embedded
 #   sjlj_probe.wasm  FreeType alone + wasm/sjlj_probe.c, for the setjmp test
 #
 # BUILD_JOBS limits parallel compiles (default 4).
@@ -159,5 +161,7 @@ done
 "$cc" "${ft_flags[@]}" -I"$src/gpu/extern" -c "$root/wasm/sjlj_probe.c" -o "$build/obj/sjlj_probe.o"
 "$cc" -O2 "${link_flags[@]}" -Wl,--wrap=__wasm_longjmp \
 	"$build/obj/sjlj_probe.o" "${probe_objs[@]}" -o "$out/sjlj_probe.wasm"
+
+cp "$out/bui_kit.wasm" "$root/internal/engine/wasmengine/bui_kit.wasm"
 
 ls -l "$out"/*.wasm
