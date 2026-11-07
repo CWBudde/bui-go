@@ -22,6 +22,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -747,7 +748,10 @@ func TestNoDisplay(t *testing.T) {
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestNoDisplay$", "-test.count=1")
 
-	cmd.Env = append(os.Environ(), "DISPLAY=", "BUI_GO_TEST_NO_DISPLAY=1")
+	// The kit also accepts a Wayland socket as a display, and libwayland looks for one in
+	// XDG_RUNTIME_DIR even with WAYLAND_DISPLAY unset.
+	cmd.Env = append(os.Environ(), "DISPLAY=", "WAYLAND_DISPLAY=",
+		"XDG_RUNTIME_DIR="+filepath.Join(t.TempDir(), "missing"), "BUI_GO_TEST_NO_DISPLAY=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("subprocess: %v\n%s", err, out)
 	}

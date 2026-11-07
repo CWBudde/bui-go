@@ -83,7 +83,7 @@ blocks are copied into [bui-source-notices.txt](licenses/bui-source-notices.txt)
 
 ## Credited by BUI, not in these binaries
 
-BUI's [credits](https://github.com/ppmpreetham/BUI/blob/e3aba90f9443490184407d14de4bceb3f432d2f3/website/src/content/docs/project/license-and-credits.mdx)
+BUI's [credits](https://github.com/ppmpreetham/BUI/blob/09a154c64cf3b0689517e420aa229e92f0fec11e/website/src/content/docs/project/license-and-credits.mdx)
 also list these. bui-go's builds leave them out, as they belong to parts of BUI's tree that are not compiled here:
 
 - Dear ImGui (`BUI_BUILD_IMGUI=OFF` in both build scripts)
