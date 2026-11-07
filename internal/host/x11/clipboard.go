@@ -27,27 +27,50 @@ func (win *window) ClipboardGet() (string, bool) {
 		return h.clip, true
 	}
 
-	xproto.ConvertSelection(h.c, win.xid, h.atoms.clipboard, h.atoms.utf8, h.atoms.selection, xproto.TimeCurrentTime)
+	return win.paste()
+}
+
+// paste asks the clipboard's owner for its text. Each request names its own property, so
+// that an owner answering after the timeout cannot answer this one. A refusal names no
+// property: after a timeout it may be the late answer, so only the timeout can end the
+// wait, which fails the same way.
+func (win *window) paste() (string, bool) {
+	h := win.host
+	property := h.atoms.selections[h.selectionNext]
+	h.selectionNext = (h.selectionNext + 1) % len(h.atoms.selections)
+
+	xproto.ConvertSelection(h.c, win.xid, h.atoms.clipboard, h.atoms.utf8, property, xproto.TimeCurrentTime)
 
 	ev := h.events.waitFor(clipboardTimeout, func(ev xgb.Event) bool {
 		sn, ok := ev.(xproto.SelectionNotifyEvent)
+		if !ok || sn.Requestor != win.xid {
+			return false
+		}
 
-		return ok && sn.Requestor == win.xid
+		return sn.Property == property || sn.Property == xproto.AtomNone && !h.selectionLate
 	})
 
 	sn, ok := ev.(xproto.SelectionNotifyEvent)
-	if !ok || sn.Property == xproto.AtomNone {
+	if !ok {
+		h.selectionLate = true
+
 		return "", false
 	}
 
-	return win.readSelection()
+	if sn.Property == xproto.AtomNone {
+		return "", false
+	}
+
+	h.selectionLate = false
+
+	return win.readSelection(property)
 }
 
 // readSelection takes the text the clipboard's owner stored on this window.
-func (win *window) readSelection() (string, bool) {
+func (win *window) readSelection(property xproto.Atom) (string, bool) {
 	const maxClipboardLongs = 1 << 24
 
-	prop, err := xproto.GetProperty(win.host.c, true, win.xid, win.host.atoms.selection, xproto.GetPropertyTypeAny,
+	prop, err := xproto.GetProperty(win.host.c, true, win.xid, property, xproto.GetPropertyTypeAny,
 		0, maxClipboardLongs).Reply()
 	if err != nil || prop == nil {
 		return "", false

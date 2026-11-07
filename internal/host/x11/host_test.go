@@ -786,7 +786,7 @@ func peerPaste(t *testing.T, f *fixture, peer *xgb.Conn, target xproto.Atom) str
 	}
 	defer xproto.DestroyWindow(peer, xid)
 
-	xproto.ConvertSelection(peer, xid, f.h.atoms.clipboard, target, f.h.atoms.selection, xproto.TimeCurrentTime)
+	xproto.ConvertSelection(peer, xid, f.h.atoms.clipboard, target, f.h.atoms.selections[0], xproto.TimeCurrentTime)
 
 	if _, err := xproto.GetInputFocus(peer).Reply(); err != nil {
 		t.Fatal(err)
@@ -830,7 +830,7 @@ func peerPaste(t *testing.T, f *fixture, peer *xgb.Conn, target xproto.Atom) str
 			return ""
 		}
 
-		prop, err := xproto.GetProperty(peer, true, xid, f.h.atoms.selection, xproto.GetPropertyTypeAny, 0, 1<<16).Reply()
+		prop, err := xproto.GetProperty(peer, true, xid, f.h.atoms.selections[0], xproto.GetPropertyTypeAny, 0, 1<<16).Reply()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -902,6 +902,111 @@ func peerOwn(t *testing.T, f *fixture, peer *xgb.Conn, text string) (stop func()
 
 		xproto.DestroyWindow(peer, xid)
 	}
+}
+
+// An owner that answers after the timeout must not answer the next paste, with its text
+// or with its refusal.
+func TestClipboardIgnoresLateAnswers(t *testing.T) {
+	late := clipboardTimeout + 50*time.Millisecond
+
+	for _, tc := range []struct {
+		name  string
+		first string
+	}{
+		{"late text", "alt"},
+		{"late refusal", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, "text", 300, 40)
+			f.show()
+
+			peer, err := xgb.NewConn()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer peer.Close()
+
+			done := peerAnswers(t, f, peer, []peerAnswer{{late, tc.first}, {100 * time.Millisecond, "neu"}})
+
+			if got, ok := f.w.ClipboardGet(); ok {
+				t.Errorf("the first paste got %q before the owner answered", got)
+			}
+
+			if got, ok := f.w.ClipboardGet(); !ok || got != "neu" {
+				t.Errorf("the second paste got %q, %v", got, ok)
+			}
+
+			<-done
+		})
+	}
+}
+
+// peerAnswer is how a peer answers one request: after a delay, with text or, if there is
+// none, by refusing.
+type peerAnswer struct {
+	delay time.Duration
+	text  string
+}
+
+// peerAnswers makes the peer own the clipboard and answer requests in order. The returned
+// channel closes after the last.
+func peerAnswers(t *testing.T, f *fixture, peer *xgb.Conn, answers []peerAnswer) <-chan struct{} {
+	t.Helper()
+
+	xid, err := xproto.NewWindowId(peer)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	screen := xproto.Setup(peer).DefaultScreen(peer)
+
+	if err := xproto.CreateWindowChecked(peer, screen.RootDepth, xid, screen.Root, 0, 0, 1, 1, 0,
+		xproto.WindowClassInputOutput, screen.RootVisual, 0, nil).Check(); err != nil {
+		t.Fatal(err)
+	}
+
+	xproto.SetSelectionOwner(peer, xid, f.h.atoms.clipboard, xproto.TimeCurrentTime)
+
+	if _, err := xproto.GetInputFocus(peer).Reply(); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		for _, answer := range answers {
+			var rq xproto.SelectionRequestEvent
+
+			for ok := false; !ok; {
+				ev, _ := peer.WaitForEvent()
+				if ev == nil {
+					return
+				}
+
+				rq, ok = ev.(xproto.SelectionRequestEvent)
+			}
+
+			time.Sleep(answer.delay)
+
+			notify := xproto.SelectionNotifyEvent{
+				Time: rq.Time, Requestor: rq.Requestor, Selection: rq.Selection, Target: rq.Target, Property: xproto.AtomNone,
+			}
+
+			if answer.text != "" {
+				xproto.ChangeProperty(peer, xproto.PropModeReplace, rq.Requestor, rq.Property, rq.Target, 8,
+					uint32(len(answer.text)), []byte(answer.text))
+
+				notify.Property = rq.Property
+			}
+
+			xproto.SendEvent(peer, false, rq.Requestor, 0, string(notify.Bytes()))
+			xproto.GetInputFocus(peer).Reply() //nolint:errcheck // only flushes what was sent
+		}
+	}()
+
+	return done
 }
 
 // A client with a selection that never answers must not hang the paste, and events that

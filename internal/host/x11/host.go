@@ -60,6 +60,11 @@ type Host struct {
 	clip    string
 	hasClip bool
 
+	// selectionNext is the next paste's property in atoms.selections, and selectionLate
+	// says that a paste timed out, with no answer to a later one since.
+	selectionNext int
+	selectionLate bool
+
 	// wake holds at most one pending wake, so that Wake never blocks.
 	wake     chan struct{}
 	wakeFunc func()
@@ -76,7 +81,11 @@ var _ engine.Host = (*Host)(nil)
 
 // atoms are the interned names the host needs, once connected.
 type atoms struct {
-	delete, protocols, clipboard, utf8, targets, selection, netWMName xproto.Atom
+	delete, protocols, clipboard, utf8, targets, netWMName xproto.Atom
+
+	// selections are the properties pastes take turns with. The server never frees an
+	// atom, so these are few rather than one per paste.
+	selections [4]xproto.Atom
 }
 
 // init quiets xgb's own log, which says "could not get authority info" on every
@@ -203,7 +212,10 @@ func internAtoms(c *xgb.Conn) (atoms, error) {
 		{"CLIPBOARD", &a.clipboard},
 		{"UTF8_STRING", &a.utf8},
 		{"TARGETS", &a.targets},
-		{"BUI_SELECTION", &a.selection},
+		{"BUI_SELECTION_0", &a.selections[0]},
+		{"BUI_SELECTION_1", &a.selections[1]},
+		{"BUI_SELECTION_2", &a.selections[2]},
+		{"BUI_SELECTION_3", &a.selections[3]},
 		{"_NET_WM_NAME", &a.netWMName},
 	} {
 		r, err := xproto.InternAtom(c, false, uint16(len(n.name)), n.name).Reply() //nolint:gosec // short constants
