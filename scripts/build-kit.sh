@@ -44,9 +44,10 @@ cmake -S "$src" -B "$build" \
 cmake --build "$build" --target bui_kit -j "$(nproc)"
 
 # Without the X11 headers CMake only prints a status line and the kit builds with
-# kit_window_null.c: it links, then reports no display forever.
+# kit_window_null.c: it links, then reports no display forever. Where Wayland support is
+# built, BK_window_run moves to kit_window_linux.c and the X11 host's is bk_x11_window_run.
 if [ "$goos" = linux ] && ! nm --defined-only "$build/kit/libbui_kit.a" 2>/dev/null |
-	awk '/\.o:$/ { x11 = ($0 == "kit_window_x11.c.o:") } x11 && $2 == "T" && $3 == "BK_window_run" { found = 1 } END { exit !found }'; then
+	awk '/\.o:$/ { x11 = ($0 == "kit_window_x11.c.o:") } x11 && $2 == "T" && ($3 == "BK_window_run" || $3 == "bk_x11_window_run") { found = 1 } END { exit !found }'; then
 	echo "build-kit: the X11 window host was not built; install the X11 headers (libx11-dev) and rebuild" >&2
 	exit 1
 fi
