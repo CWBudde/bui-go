@@ -62,7 +62,7 @@ func loadForTest(t *testing.T, o options) *module {
 	return m
 }
 
-// callExport calls an export the way the Kit calls of a later phase will.
+// callExport calls an export directly, past the Kit.
 func callExport(t *testing.T, m *module, name string, params ...uint64) uint64 {
 	t.Helper()
 
