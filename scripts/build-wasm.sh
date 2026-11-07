@@ -8,7 +8,9 @@
 #   bui_kit.wasm     kit + gpu + core + wasm/shim.c, exports in wasm/exports.txt;
 #                    also copied to internal/engine/wasmengine, where it is
 #                    committed and embedded
-#   sjlj_probe.wasm  FreeType alone + wasm/sjlj_probe.c, for the setjmp test
+#   sjlj_probe.wasm  FreeType alone + wasm/sjlj_probe.c, for the setjmp test;
+#                    also copied to internal/engine/wasmengine/testdata, where it
+#                    is committed so that the test runs everywhere
 #
 # BUILD_JOBS limits parallel compiles (default 4).
 set -euo pipefail
@@ -163,5 +165,7 @@ done
 	"$build/obj/sjlj_probe.o" "${probe_objs[@]}" -o "$out/sjlj_probe.wasm"
 
 cp "$out/bui_kit.wasm" "$root/internal/engine/wasmengine/bui_kit.wasm"
+mkdir -p "$root/internal/engine/wasmengine/testdata"
+cp "$out/sjlj_probe.wasm" "$root/internal/engine/wasmengine/testdata/sjlj_probe.wasm"
 
 ls -l "$out"/*.wasm

@@ -16,6 +16,7 @@ BK_node_child_count
 BK_node_rect
 BK_set_num
 BK_set_str
+BK_set_strs
 BK_get_num
 BK_get_str
 BK_geom_set_manager

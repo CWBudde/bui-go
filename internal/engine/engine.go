@@ -63,6 +63,9 @@ type Kit interface {
 	// SetNum and SetStr return false for a key the kit does not know.
 	SetNum(n Node, key string, v float64) bool
 	SetStr(n Node, key, v string) bool
+	// SetStrs sets a string list, such as a dropdown's "items". It returns false for
+	// a key the kit does not know.
+	SetStrs(n Node, key string, vs []string) bool
 	// GetNum returns 0 and GetStr returns "" for an unknown key.
 	GetNum(n Node, key string) float64
 	GetStr(n Node, key string) string
@@ -80,6 +83,9 @@ type Kit interface {
 
 	RasterNew(w, h int) Raster
 	RasterFree(r Raster)
+	// RasterPixels returns a copy of r's pixels as 0x00RRGGBB, row by row. It is a
+	// copy because a view into a module's memory goes stale when that memory grows.
+	RasterPixels(r Raster) []uint32
 	// Render lays out and draws the whole tree into r.
 	Render(ctx Context, r Raster, w, h int)
 	// Press and Release send left-button input.
