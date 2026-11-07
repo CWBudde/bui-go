@@ -1,0 +1,25 @@
+# a06371a49e7d7ca28a7dd46d80763ea481d11461, load: 4,13 3,93 3,98
+goos: darwin
+goarch: arm64
+pkg: github.com/CWBudde/bui-go/internal/enginetest
+cpu: Apple M5 Pro
+BenchmarkWasm/Render/counter-15         	     200	     89688 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Render/counter-15         	     200	     82758 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Render/counter-15         	     200	     85620 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Render/dense-15           	     200	   4495640 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Render/dense-15           	     200	   4391672 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Render/dense-15           	     200	   4399821 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Hover/counter-15          	     200	     50010 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Hover/counter-15          	     200	     46258 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Hover/counter-15          	     200	     46840 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Hover/dense-15            	     200	     48452 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Hover/dense-15            	     200	     47156 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Hover/dense-15            	     200	     44178 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Click-15                  	     200	       402.7 ns/op	     117 B/op	       0 allocs/op
+BenchmarkWasm/Click-15                  	     200	       341.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/Click-15                  	     200	       335.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/SetNum-15                 	     200	        87.50 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/SetNum-15                 	     200	        85.00 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWasm/SetNum-15                 	     200	        83.12 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/CWBudde/bui-go/internal/enginetest	2.943s

@@ -14,10 +14,19 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 count="${1:-5}"
 out="$root/bench/$(date +%F)-$(git -C "$root" rev-parse --short HEAD).txt"
 
+# macOS has no /proc: its sysctl prints "{ 1.23 2.34 3.45 }".
+load() {
+	if [[ -r /proc/loadavg ]]; then
+		cut -d' ' -f1-3 /proc/loadavg
+	else
+		sysctl -n vm.loadavg | tr -d '{}' | xargs
+	fi
+}
+
 mkdir -p "$root/bench"
 cd "$root"
 {
-	printf '# %s, load: %s\n' "$(git rev-parse HEAD)" "$(cut -d' ' -f1-3 /proc/loadavg)"
+	printf '# %s, load: %s\n' "$(git rev-parse HEAD)" "$(load)"
 	go test -run '^$' -bench . -benchmem -benchtime 200x -count "$count" ./internal/enginetest/
 	if command -v xvfb-run >/dev/null; then
 		xvfb-run -a go test -run '^$' -bench . -benchmem -benchtime 100x -count "$count" ./internal/host/x11/
