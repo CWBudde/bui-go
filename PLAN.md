@@ -357,23 +357,25 @@ Corrections from this phase:
   - [x] Real clock, sleep and random sources, stderr wired through, and no file system mounts
   - [x] Compilation cache in `os.UserCacheDir()`, falling back without error if it is not writable
   - [x] Memory limit through `WithMemoryLimitPages`
-- [ ] Implement the calls
-  - [ ] String marshalling through `malloc` and `free`, reusing one scratch buffer
-  - [ ] Give each call nesting level its own `CallWithStack` slice: handlers re-enter the module during an emit
-  - [ ] Nodes, properties, geometry, `Add`, `Pack`, `Remove`, `Close`, events, `EvalNumber`
-  - [ ] `Headless` render, press and release
-  - [ ] Check every export error and treat it as fatal
-- [ ] `Supported` returns false and `Run` returns `ErrNoDisplay` for now, as the API already defines
-- [ ] Build the shared tests in `internal/enginetest`
-  - [ ] Conformance suite that runs on each engine
-  - [ ] Golden test comparing live pixels across trees (buttons, sliders, text, menus, scrolled views) at the Phase 0
+- [x] Implement the calls
+  - [x] String marshalling through `malloc` and `free`, reusing one scratch buffer per nesting level (see the notes)
+  - [x] Give each call nesting level its own `CallWithStack` slice: handlers re-enter the module during an emit
+  - [x] Nodes, properties, geometry, `Add`, `Pack`, `Close`, events, `EvalNumber`. The API has no `Remove`: `NodeAdd` moves
+        a node and `NodeFree` frees it
+  - [x] `Headless` render, press and release
+  - [x] Check every export error and treat it as fatal
+- [x] `Supported` returns false and `Run` returns `ErrNoDisplay` for now, as the API already defines
+- [x] Build the shared tests in `internal/enginetest`
+  - [x] Conformance suite that runs on each engine
+  - [x] Golden test comparing live pixels across trees (buttons, sliders, text, menus, scrolled views) at the Phase 0
         tolerance, in one test binary. Phase 0 got exact matches, so start strict and loosen only with a reason
-  - [ ] Keep the `setjmp` probe (`wasm/sjlj_probe.c`) as a regression test for the exnref build
+  - [x] Keep the `setjmp` probe (`wasm/sjlj_probe.c`) as a regression test for the exnref build. It is in `wasmengine`,
+        not here, as it is wasm-only and guards the unexported `runtimeConfig`
 - [x] Commit `internal/engine/wasmengine/bui_kit.wasm`, as with the `.a` files
-- [ ] Exit
-  - [ ] `CGO_ENABLED=0 go test ./...` passes, with window tests skipped
-  - [ ] `go test -tags bui_nocgo -race ./...` passes on a cgo machine
-  - [ ] `CGO_ENABLED=0 GOOS={windows,darwin} go build ./...` succeeds
+- [x] Exit
+  - [x] `CGO_ENABLED=0 go test ./...` passes, with window tests skipped
+  - [x] `go test -tags bui_nocgo -race ./...` passes on a cgo machine
+  - [x] `CGO_ENABLED=0 GOOS={windows,darwin} go build ./...` succeeds
 
 Notes from the runtime work:
 
@@ -387,7 +389,32 @@ Notes from the runtime work:
   does then.
 - **The module is byte-identical on rebuild.** `build-wasm.sh` now copies it into the package, and re-running the script
   leaves `git status` clean in this checkout.
-- **The golden test needs a new `Kit` call.** `engine.Kit` cannot read raster pixels yet, on either engine.
+
+Notes from the calls and shared tests:
+
+- **Cgo and wasm match exactly.** All 22 golden stages across 7 trees are 100.0000% exact with a largest channel difference
+  of 0, including an open menu, a scrolled view and a 1080p tree. So are wazero's compiler and interpreter. The tolerance
+  stayed at Phase 0's and was never needed.
+- **The exit boxes rest on local runs.** PR CI runs `-race` with cgo, which covers the wasm engine through `enginetest` and
+  `wasmengine`, but not package `bui` on wasm. That needs the Phase 6 jobs.
+- **A nesting level needs its own `api.Function` too, not just a stack.** A wazero function keeps one native stack, so
+  re-entering the same one overwrites the call in progress, ending in `fatal error: stack overflow` on the compiler. The
+  spike's shared function map has this bug, and only a handler taking a different path through the kit than the emitting
+  call shows it. `level` in `kit.go` holds the functions, stack and scratch buffer.
+- **Some of these tests are white-box.** No setter in `kit_core.c` reads its strings after emitting, and wazero reads
+  parameters on entry and writes results on return. So a shared scratch buffer or stack changes no behaviour today, and the
+  tests inspect module memory and stack addresses instead. They guard the contract for a kit update that does.
+- **The seam gained `RasterPixels` and `SetStrs`,** for the golden test: nothing could read a raster, and a dropdown's items
+  are a string list. `BK_set_strs` is a new export. The module is now 3,444,973 bytes, sha256 `6c3c4ca8…a00b`, and still
+  byte-identical on rebuild, as is the committed 1.36 MiB `testdata/sjlj_probe.wasm`.
+- **Long drawn text is very expensive.** One 2000-character dropdown item took a test from 0.13 s to 45 s on the interpreter,
+  and past 10 minutes under `-race`, as the kit lays it out on every render. Long strings in the tests are not drawn. It is
+  not profiled beyond that, and may matter for Phase 4's hardening.
+- **Differences from cgo:** a null or low reference reads wasm memory rather than crashing (reasoned, not tested; `live()`
+  in package `bui` guards it), and a scratch buffer never shrinks, so a one-off huge string stays held. Phase 4 can free
+  oversized ones.
+- **`enginetest` cannot reach** motion, hover, wheel, keyboard, slider drags, damage-only rendering or `Host`, as the seam
+  has no such calls yet. Phase 3 adds them, and its tests must then cover them.
 
 ### Phase 3: Linux window host in Go
 
