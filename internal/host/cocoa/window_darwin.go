@@ -23,6 +23,50 @@ const (
 
 	pixelSize   = 4
 	timerCustom = -1
+
+	// NSPasteboardTypeString.
+	pasteboardString = "public.utf8-plain-text"
+)
+
+// The kit's BK_CURSOR_* values with a shape here. BK_CURSOR_DEFAULT and the rest are the arrow.
+const (
+	cursorEW         = 1
+	cursorNS         = 2
+	cursorText       = 3
+	cursorCrosshair  = 4
+	cursorHand       = 5
+	cursorMove       = 6
+	cursorNone       = 7
+	cursorNotAllowed = 10
+)
+
+var (
+	selActivate            = objc.RegisterName("activateIgnoringOtherApps:")
+	selMakeKeyOrderFront   = objc.RegisterName("makeKeyAndOrderFront:")
+	selSetMouseMoved       = objc.RegisterName("setAcceptsMouseMovedEvents:")
+	selMouseOutside        = objc.RegisterName("mouseLocationOutsideOfEventStream")
+	selConvertRectToScreen = objc.RegisterName("convertRectToScreen:")
+	selScreens             = objc.RegisterName("screens")
+	selFirstObject         = objc.RegisterName("firstObject")
+	selFrame               = objc.RegisterName("frame")
+	selProcessInfo         = objc.RegisterName("processInfo")
+	selSystemUptime        = objc.RegisterName("systemUptime")
+	selSet                 = objc.RegisterName("set")
+	selHide                = objc.RegisterName("hide")
+	selUnhide              = objc.RegisterName("unhide")
+	selArrowCursor         = objc.RegisterName("arrowCursor")
+	selResizeEW            = objc.RegisterName("resizeLeftRightCursor")
+	selResizeNS            = objc.RegisterName("resizeUpDownCursor")
+	selIBeam               = objc.RegisterName("IBeamCursor")
+	selCrosshair           = objc.RegisterName("crosshairCursor")
+	selPointingHand        = objc.RegisterName("pointingHandCursor")
+	selOpenHand            = objc.RegisterName("openHandCursor")
+	selNotAllowed          = objc.RegisterName("operationNotAllowedCursor")
+	selGeneralPasteboard   = objc.RegisterName("generalPasteboard")
+	selStringForType       = objc.RegisterName("stringForType:")
+	selDeclareTypes        = objc.RegisterName("declareTypes:owner:")
+	selSetString           = objc.RegisterName("setString:forType:")
+	selArrayWithObject     = objc.RegisterName("arrayWithObject:")
 )
 
 // window is one NSWindow on a kit context. It implements engine.WindowHost.
@@ -31,6 +75,7 @@ type window struct {
 	id     engine.Window
 	nswin  objc.ID // 0 once closed
 	owned  objc.ID // the same window, which this holds a reference to until WindowFree
+	view   objc.ID
 	layer  objc.ID
 	ctx    engine.Context
 	raster engine.Raster
@@ -41,6 +86,11 @@ type window struct {
 	rasterH       int
 	renderPending bool
 	full          bool
+
+	cursor           int
+	flags            uint64  // the modifiers at the last flagsChanged
+	scrollX, scrollY float64 // trackpad scroll not yet sent, in points
+	shown            bool
 
 	tipID             int
 	tipDue, customDue time.Time
@@ -64,19 +114,33 @@ var current *Host
 
 func registerDelegate() bool {
 	onClose := func(_ objc.ID, _ objc.SEL, note objc.ID) {
-		if win := current.findNS(note.Send(selObject)); win != nil {
-			win.forget()
-		}
+		guarded(func() {
+			if win := current.findNS(note.Send(selObject)); win != nil {
+				win.forget()
+			}
+		})
 	}
 	onResize := func(_ objc.ID, _ objc.SEL, note objc.ID) {
-		if win := current.findNS(note.Send(selObject)); win != nil {
-			win.syncSize()
-		}
+		guarded(func() {
+			if win := current.findNS(note.Send(selObject)); win != nil {
+				win.syncSize()
+			}
+		})
+	}
+
+	// Modifiers released while another application was in front sent no flagsChanged here.
+	onBecomeKey := func(_ objc.ID, _ objc.SEL, note objc.ID) {
+		guarded(func() {
+			if win := current.findNS(note.Send(selObject)); win != nil {
+				win.flags = objc.Send[uint64](clsNSEvent, selModifierFlags)
+			}
+		})
 	}
 
 	cls, err := objc.RegisterClass("BUIGoWindowDelegate", objc.GetClass("NSObject"), nil, nil, []objc.MethodDef{
 		{Cmd: objc.RegisterName("windowWillClose:"), Fn: onClose},
 		{Cmd: objc.RegisterName("windowDidResize:"), Fn: onResize},
+		{Cmd: objc.RegisterName("windowDidBecomeKey:"), Fn: onBecomeKey},
 	})
 	if err != nil {
 		return false
@@ -134,17 +198,21 @@ func (win *window) create(title string, width, height int) {
 	ns.Send(selSetDelegate, objc.ID(delegateClass).Send(selAlloc).Send(selInit))
 
 	// A layer-hosting view: the host owns the layer, and its contents are the frame.
-	view := clsNSView.Send(selAlloc).Send(selInitFrame, rect)
+	view := objc.ID(viewClass).Send(selAlloc).Send(selInitFrame, rect)
 	layer := clsCALayer.Send(selAlloc).Send(selInit)
 	layer.Send(selSetContentsScale, win.pxOf(ns))
 	layer.Send(selSetContentsGrav, nsString("topLeft"))
 	view.Send(selSetLayer, layer)
 	view.Send(selSetWantsLayer, true)
 	ns.Send(selSetContentView, view)
+	ns.Send(selMakeFirstResp, view)
+	ns.Send(selSetMouseMoved, true)
+	addTracking(view)
 	view.Send(selRelease)
 	ns.Send(selCenter)
 
-	win.nswin, win.owned, win.layer = ns, ns, layer
+	win.nswin, win.owned, win.view, win.layer = ns, ns, view, layer
+	win.flags = objc.Send[uint64](clsNSEvent, selModifierFlags)
 	win.syncSize()
 }
 
@@ -177,15 +245,26 @@ func (h *Host) find(id engine.Window) *window {
 	return nil
 }
 
-// WindowShow implements engine.Host. It doesn't activate the application yet, so that the
-// spike's tests leave the user's focus alone. The port has to, as the C host does.
+// WindowShow implements engine.Host. A program started from a terminal isn't in front, so
+// the first show activates it. Without that, typing would go nowhere until the first click.
 func (h *Host) WindowShow(id engine.Window) {
 	if win := h.find(id); win != nil && win.nswin != 0 {
 		// Ordering a window front autoreleases references to it, and nothing else would
 		// drain them outside the loop: the window would outlive WindowFree.
 		pool := poolPush()
 
-		win.nswin.Send(selOrderFront)
+		if win.host.noActivate {
+			win.nswin.Send(selOrderFront)
+		} else {
+			if !win.shown {
+				win.shown = true
+
+				h.app.Send(selActivate, true)
+			}
+
+			win.nswin.Send(selMakeKeyOrderFront, objc.ID(0))
+		}
+
 		poolPop(pool)
 
 		win.full, win.renderPending = true, true
@@ -205,7 +284,13 @@ func (h *Host) WindowFree(id engine.Window) {
 		win.nswin.Send(selClose)
 	}
 
-	win.owned.Send(selRelease)
+	// AppKit may be inside this window's methods, if it is freed from one of its events.
+	if h.depth > 0 {
+		h.dead = append(h.dead, win.owned)
+	} else {
+		win.owned.Send(selRelease)
+	}
+
 	poolPop(pool)
 
 	h.kit.ContextSetEmitHost(win.ctx)
@@ -222,6 +307,10 @@ func (h *Host) WindowFree(id engine.Window) {
 
 func (win *window) forget() {
 	if win.nswin != 0 {
+		if win.cursor == cursorNone {
+			win.host.showCursor(true)
+		}
+
 		win.nswin = 0
 		win.host.open--
 	}
@@ -283,17 +372,150 @@ func (win *window) Request() {
 	}
 }
 
-// SetCursor implements engine.WindowHost. Not in the spike.
-func (win *window) SetCursor(int) {}
+// SetCursor implements engine.WindowHost. Like a window's cursor elsewhere, it only shows
+// while the pointer is over the view or dragging from it, and cursorUpdate: applies it on entry.
+func (win *window) SetCursor(cursor int) {
+	win.cursor = cursor
 
-// Warp implements engine.WindowHost. Not in the spike.
-func (win *window) Warp(int, int) {}
+	if win.nswin == 0 {
+		return
+	}
 
-// ClipboardGet implements engine.WindowHost. Not in the spike.
-func (win *window) ClipboardGet() (string, bool) { return "", false }
+	pool := poolPush()
+	defer poolPop(pool)
 
-// ClipboardSet implements engine.WindowHost. Not in the spike.
-func (win *window) ClipboardSet(string) {}
+	if win.pointerInside() || win.host.buttons() != 0 {
+		win.applyCursor()
+	}
+}
+
+func (win *window) pointerInside() bool {
+	p := objc.Send[nsPoint](win.view, selConvertFromView, objc.Send[nsPoint](win.nswin, selMouseOutside), objc.ID(0))
+	b := objc.Send[nsRect](win.view, selBounds)
+
+	return p.X >= 0 && p.Y >= 0 && p.X < b.Size.W && p.Y < b.Size.H
+}
+
+func (win *window) applyCursor() {
+	win.host.showCursor(win.cursor != cursorNone)
+
+	if win.cursor != cursorNone {
+		clsNSCursor.Send(cursorSelector(win.cursor)).Send(selSet)
+	}
+}
+
+// showCursor keeps NSCursor's hide and unhide paired, as they are counted.
+func (h *Host) showCursor(visible bool) {
+	switch {
+	case visible && h.cursorHidden:
+		clsNSCursor.Send(selUnhide)
+	case !visible && !h.cursorHidden:
+		clsNSCursor.Send(selHide)
+	default:
+		return
+	}
+
+	h.cursorHidden = !visible
+}
+
+// cursorSelector picks NSCursor's class method for a BK_CURSOR_* value. AppKit has no public
+// cursor for the two diagonal resizes or for waiting, so those show the arrow.
+func cursorSelector(cursor int) objc.SEL {
+	switch cursor {
+	case cursorEW:
+		return selResizeEW
+	case cursorNS:
+		return selResizeNS
+	case cursorText:
+		return selIBeam
+	case cursorCrosshair:
+		return selCrosshair
+	case cursorHand:
+		return selPointingHand
+	case cursorMove:
+		return selOpenHand
+	case cursorNotAllowed:
+		return selNotAllowed
+	}
+
+	return selArrowCursor
+}
+
+// warpTarget converts window pixels to Quartz's global coordinates, which start at the top
+// left of the primary screen.
+func (win *window) warpTarget(x, y int) nsPoint {
+	b := objc.Send[nsRect](win.view, selBounds)
+	inView := nsPoint{float64(x) / win.px, b.Size.H - float64(y)/win.px}
+	inWindow := objc.Send[nsPoint](win.view, selConvertToView, inView, objc.ID(0))
+	onScreen := objc.Send[nsRect](win.nswin, selConvertRectToScreen, nsRect{Origin: inWindow})
+
+	return nsPoint{onScreen.Origin.X, primaryHeight() - onScreen.Origin.Y}
+}
+
+func primaryHeight() float64 {
+	primary := clsNSScreen.Send(selScreens).Send(selFirstObject)
+	if primary == 0 {
+		return 0
+	}
+
+	f := objc.Send[nsRect](primary, selFrame)
+
+	return f.Origin.Y + f.Size.H
+}
+
+// Warp implements engine.WindowHost. The association drops the 500 ms of mouse events that
+// Quartz suppresses after a synthetic move.
+func (win *window) Warp(x, y int) {
+	if win.nswin == 0 {
+		return
+	}
+
+	pool := poolPush()
+	defer poolPop(pool)
+
+	cgWarp(win.warpTarget(x, y))
+	cgAssociateMouse(true)
+
+	win.host.warpTime = objc.Send[float64](clsNSProcessInfo.Send(selProcessInfo), selSystemUptime)
+}
+
+// ClipboardGet implements engine.WindowHost.
+func (win *window) ClipboardGet() (string, bool) {
+	if win.nswin == 0 {
+		return "", false
+	}
+
+	pool := poolPush()
+	defer poolPop(pool)
+
+	s := win.host.pasteboard().Send(selStringForType, nsString(pasteboardString))
+	if s == 0 {
+		return "", false
+	}
+
+	return goString(s), true
+}
+
+// ClipboardSet implements engine.WindowHost. Text that isn't UTF-8 has no NSString, and is
+// dropped.
+func (win *window) ClipboardSet(text string) {
+	if win.nswin == 0 {
+		return
+	}
+
+	pool := poolPush()
+	defer poolPop(pool)
+
+	s := nsString(text)
+	if s == 0 {
+		return
+	}
+
+	kind := nsString(pasteboardString)
+	pb := win.host.pasteboard()
+	pb.Send(selDeclareTypes, clsNSArray.Send(selArrayWithObject, kind), objc.ID(0))
+	pb.Send(selSetString, s, kind)
+}
 
 // Schedule implements engine.WindowHost.
 func (win *window) Schedule(ms, timer int) {

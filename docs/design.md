@@ -376,8 +376,9 @@ and the module's byte-identical rebuild.
 
 - **Windows is built, not run.**
 - **Windows has no window host.** It would be a port of `kit_window_win32.c` (987 lines).
-- **macOS has only a spike of a window host,** described under "The Cocoa spike". A full port of `kit_window_cocoa.m` (1921 lines) is
-  held until BUI's owner answers on [BUI#8](https://github.com/ppmpreetham/BUI/issues/8).
+- **The macOS window host is half done,** described under "The Cocoa spike" and "Input on macOS". It is a port of
+  `kit_window_cocoa.m` (1921 lines), started before BUI's owner answered on [BUI#8](https://github.com/ppmpreetham/BUI/issues/8).
+  Its input has only been driven by events the tests made, not by a hand on a real mouse and keyboard.
 - **A real pointer on a real desktop has not been tried.** Drawing, the `Do` ticker, resizing and the close button were checked on a
   real X session and window manager, through `xdotool windowsize` and `wmctrl -c`. Hovering and dragging were driven on Xvfb only.
 
@@ -441,6 +442,31 @@ with `CGO_ENABLED=0`. It opens a window and presents the raster, and it has no i
 **Not tried:** a click on the real close button (`TestCloseEndsRun` closes it from code), dragging a window's edge, whose nested
 AppKit loop the host doesn't handle yet, moving between screens of different scale, and activation. The layer and the delegate are
 each leaked once per window.
+
+### Input on macOS
+
+On 2026-11-07, Christian counted 1.6x as close and lifted the hold on the port. Its first part takes the input of
+`kit_window_cocoa.m`'s view, with the same mappings: the left, right and middle buttons, moves and drags, the pointer leaving,
+wheel notches, a trackpad's precise deltas summed into notches, keys with their layout's keysym and text, modifier keys as key
+events, cursors, `Warp` and the clipboard. Command maps to Ctrl, as Blender's macOS keymaps use it for Ctrl's shortcuts.
+
+- **The tests make their own events,** with `NSEvent` and `CGEvent`, and need no grant. Mouse events go through the queue, `NSApp`
+  and the window, as the window server's would. Keys go to the window directly, because `NSApp` only sends keys to the key window,
+  which a test app can't have: tests run under the prohibited activation policy, as anything else comes to the front by itself
+  once it waits for events, and took focus from the user's editor for seconds during a run. A middle button and scrolling go to the
+  view directly, as `NSEvent` can't make them for a window.
+- **Each test fails when its handler is broken.** All 47 handler breaks tried failed their test, run on the MacBook.
+- **What tests don't reach:** the real clipboard (they use a private pasteboard), a real warp, which would move the user's pointer,
+  `pressedMouseButtons`, and activation, which the tests turn off. A hand on the MacBook is the check left for those.
+- **Two changes from the C host:**
+  - BUI clamps the cursor to 0-7, which hides the pointer for `BK_CURSOR_NESW` and everything after it. Here those show the
+    arrow, or `operationNotAllowedCursor` for `BK_CURSOR_NOT_ALLOWED`.
+  - Trackpad momentum after a key press is dropped until the next gesture or wheel event. BUI clears that on any event without
+    momentum, which includes the event ending the gesture, so momentum after a key pressed during the gesture still scrolls,
+    with the new modifier.
+- **As in the C and X11 hosts:** a window freed inside one of its own events is released between loop turns, and a panic in a
+  handler ends the process.
+- **Still missing:** a menu and Cmd+Q, live resize, scale changes between screens, IME, and the leaks above.
 
 ## Known limits
 

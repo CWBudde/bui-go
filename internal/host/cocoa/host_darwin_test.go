@@ -77,16 +77,21 @@ func requireDisplay(tb testing.TB) {
 
 // newFixture makes a tree with something at the top and at the bottom of the window, so
 // that flipped frames differ from right ones. It runs on the main thread.
-func newFixture() *fixture {
+func newFixture() *fixture { return newFixtureOf("top", "middle", "bottom") }
+
+// newFixtureOf makes a frame with a button of each text in it.
+func newFixtureOf(texts ...string) *fixture {
 	k := wasmengine.Kit{}
 	k.SetEmit(func(uint32, int, float64) {})
 
 	h := New(k)
+	h.noActivate = true
+	h.buttons = func() uint64 { return 0 }
 
 	root := k.NodeNew("frame")
 	k.GeomSetPack(root)
 
-	for _, text := range []string{"top", "middle", "bottom"} {
+	for _, text := range texts {
 		n := k.NodeNew("button")
 		k.SetStr(n, "text", text)
 		k.NodeAdd(root, n)

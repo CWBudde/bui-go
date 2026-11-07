@@ -10,6 +10,8 @@ Open work for bui-go, as of 2026-11-07. Finished work belongs in `docs/design.md
   [BUI#8](https://github.com/ppmpreetham/BUI/issues/8#issuecomment-6707514269), about the committed wasm, the second X11 host,
   pinning and tags. **There is no answer yet, and Phase 3 depends on it.**
 - [bui-go#9](https://github.com/CWBudde/bui-go/pull/9) is merged, so `main` has the macOS baseline.
+- [bui-go#10](https://github.com/CWBudde/bui-go/pull/10) is merged, so `main` has the Cocoa spike. Christian counted its 1.6x as
+  close and lifted the hold on the port, so the port goes ahead before the owner answers.
 - A trial bump to BUI `bca7b8d` worked: the wasm built unmodified, reproduced byte for byte, and passed without cgo with the golden
   hashes unchanged. With cgo, only `TestNoDisplay` failed (see Phase 0).
 
@@ -32,6 +34,7 @@ None of this depends on the owner's answer.
 - [ ] Hover and drag with a real pointer on a real X session. So far these have only been driven on Xvfb.
 - [ ] Decide on wasm containment: a trap or out-of-memory ends the process. Recommendation: keep that behaviour, and file an issue
       for an opt-in fatal hook.
+- [ ] Make the load in `scripts/bench.sh` independent of the locale: on the German MacBook `sysctl` gives `7,05`. Set `LC_ALL=C`.
 
 ## Phase 1: macOS baseline on the MacBook
 
@@ -62,8 +65,8 @@ The module itself still gets built on Linux only, because only the Linux x86_64 
 Goal: `CGO_ENABLED=0 go run ./examples/counter` opens a real window on macOS. `kit_window_cocoa.m` (about 1,900 lines) is the model,
 reached through purego and the Objective-C runtime, as `docs/design.md` proposes.
 
-This is a second reimplemented host, so it raises the same question as question 2 on BUI#8. Run the spike either way, but hold back
-the full port until the owner has answered.
+This is a second reimplemented host, so it raises the same question as question 2 on BUI#8. The port was held until the owner
+answered, until Christian lifted that hold on 2026-11-07: it serves bui-go either way, and goes upstream if the answer is yes.
 
 **Spike, in a time-boxed branch:**
 
@@ -83,15 +86,23 @@ the full port until the owner has answered.
 
 Continue only if a window draws correctly and the frame time is close to X11's. Otherwise, record why in `docs/design.md` and stop.
 
-The window draws correctly. Whether 1.6x counts as close is Christian's call; the recommendation is yes, as a 1080p frame stays near
-10 ms. The numbers are in "The Cocoa spike" in `docs/design.md`.
+The window draws correctly, and Christian counted 1.6x as close on 2026-11-07, as a 1080p frame stays near 10 ms. The numbers are in
+"The Cocoa spike" in `docs/design.md`.
 
 **Port, if the spike passes:**
 
-- [ ] `internal/host/cocoa` implementing `engine.Host`, with `host_darwin.go` and `host_none.go` narrowed to the remaining platforms.
-- [ ] Mouse, scroll, keyboard and text input, resize, close, `Do` wakes and the clipboard, tested in the same areas as the X11 host.
+- [x] `internal/host/cocoa` implementing `engine.Host`, with `host_darwin.go` and `host_none.go` narrowed to the remaining platforms.
+      (2026-11-07) — the spike had done it; the package comment no longer calls it a spike. All six targets cross-build without cgo.
+- [x] Mouse, scroll, keyboard and text input, resize, close, `Do` wakes and the clipboard, tested in the same areas as the X11 host.
+      (2026-11-07) — ported from the C view, with cursors and `Warp`. 363 passes and no failures on the MacBook, with and without cgo,
+      on Go 1.27.1 and 1.26.8, and each of 47 handler breaks fails its test. The input is synthetic: keys skip `NSApp`, and the real
+      clipboard, a real warp and `pressedMouseButtons` aren't reached.
 - [ ] From the spike: live resize (AppKit's nested loop), scale changes between screens, activation, a real click on the close button,
-      and the layer and delegate leaked once per window.
+      and the layer and delegate leaked once per window. (2026-11-07) — partial: the first show activates the app, and `counter`
+      came to the front over the editor and quit cleanly. The rest remains.
+- [ ] A menu with Cmd+Q, Hide and the window items, as `app_init` in the C host builds.
+- [ ] By hand on the MacBook: click, drag, scroll, type and copy and paste in `examples/counter` and a text field, as no test
+      reaches the real mouse, keyboard or clipboard.
 - [ ] A test job on `macos-latest` for whatever works without a logged-in session, plus a documented manual run on the MacBook.
 - [ ] Update the README's platform table and "What has been run" in `docs/design.md`.
 

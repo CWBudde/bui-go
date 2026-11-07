@@ -32,6 +32,8 @@ var (
 		provider, decode uintptr, interpolate bool, intent int32) uintptr
 	cgImageRelease   func(uintptr)
 	cgSessionCurrent func() uintptr
+	cgWarp           func(nsPoint) int32
+	cgAssociateMouse func(bool) int32
 	pthreadMainNP    func() int32
 	poolPush         func() uintptr
 	poolPop          func(uintptr)
@@ -86,7 +88,8 @@ var (
 // Classes, found by load.
 var (
 	clsNSApplication, clsNSEvent, clsNSDate, clsNSString, clsNSWindow,
-	clsNSView, clsNSScreen, clsCALayer, clsCATransaction objc.ID
+	clsNSScreen, clsCALayer, clsCATransaction,
+	clsNSCursor, clsNSPasteboard, clsNSArray, clsNSProcessInfo, clsNSTrackingArea objc.ID
 	nsDefaultRunLoopMode objc.ID
 	srgbSpace            uintptr
 	delegateClass        objc.Class
@@ -105,58 +108,18 @@ func load() bool {
 }
 
 func loadNow() bool {
-	libs := map[string]uintptr{}
-
-	for _, path := range []string{
-		"/System/Library/Frameworks/AppKit.framework/AppKit",
-		"/System/Library/Frameworks/QuartzCore.framework/QuartzCore",
-		"/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics",
-		"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
-		"/usr/lib/libobjc.A.dylib",
-		"/usr/lib/libSystem.B.dylib",
-	} {
-		h, err := purego.Dlopen(path, purego.RTLD_NOW|purego.RTLD_GLOBAL)
-		if err != nil {
-			return false
-		}
-
-		libs[path] = h
-	}
-
-	bind := func(fn any, name string) bool {
-		p, err := purego.Dlsym(purego.RTLD_DEFAULT, name)
-		if err != nil {
-			return false
-		}
-
-		purego.RegisterFunc(fn, p)
-
-		return true
-	}
-
-	for name, fn := range map[string]any{
-		"CFDataCreate":                   &cfDataCreate,
-		"CFRelease":                      &cfRelease,
-		"CGColorSpaceCreateWithName":     &cgColorSpaceCreateNamed,
-		"CGDataProviderCreateWithCFData": &cgDataProviderFromData,
-		"CGDataProviderRelease":          &cgDataProviderRelease,
-		"CGImageCreate":                  &cgImageCreate,
-		"CGImageRelease":                 &cgImageRelease,
-		"CGSessionCopyCurrentDictionary": &cgSessionCurrent,
-		"pthread_main_np":                &pthreadMainNP,
-		"objc_autoreleasePoolPush":       &poolPush,
-		"objc_autoreleasePoolPop":        &poolPop,
-	} {
-		if !bind(fn, name) {
-			return false
-		}
+	if !bindFunctions() {
+		return false
 	}
 
 	cls := func(name string) objc.ID { return objc.ID(objc.GetClass(name)) }
 	clsNSApplication, clsNSEvent = cls("NSApplication"), cls("NSEvent")
 	clsNSDate, clsNSString = cls("NSDate"), cls("NSString")
-	clsNSWindow, clsNSView, clsNSScreen = cls("NSWindow"), cls("NSView"), cls("NSScreen")
+	clsNSWindow, clsNSScreen = cls("NSWindow"), cls("NSScreen")
 	clsCALayer, clsCATransaction = cls("CALayer"), cls("CATransaction")
+	clsNSCursor, clsNSPasteboard = cls("NSCursor"), cls("NSPasteboard")
+	clsNSArray, clsNSProcessInfo = cls("NSArray"), cls("NSProcessInfo")
+	clsNSTrackingArea = cls("NSTrackingArea")
 
 	pool := poolPush()
 	defer poolPop(pool)
@@ -166,7 +129,48 @@ func loadNow() bool {
 	nsDefaultRunLoopMode = nsString("kCFRunLoopDefaultMode").Send(selRetain)
 	srgbSpace = cgColorSpaceCreateNamed(uintptr(nsString("kCGColorSpaceSRGB")))
 
-	return srgbSpace != 0 && registerDelegate()
+	return srgbSpace != 0 && registerDelegate() && registerView()
+}
+
+// bindFunctions opens the frameworks and binds the C functions.
+func bindFunctions() bool {
+	for _, path := range []string{
+		"/System/Library/Frameworks/AppKit.framework/AppKit",
+		"/System/Library/Frameworks/QuartzCore.framework/QuartzCore",
+		"/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics",
+		"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
+		"/usr/lib/libobjc.A.dylib",
+		"/usr/lib/libSystem.B.dylib",
+	} {
+		if _, err := purego.Dlopen(path, purego.RTLD_NOW|purego.RTLD_GLOBAL); err != nil {
+			return false
+		}
+	}
+
+	for name, fn := range map[string]any{
+		"CFDataCreate":                           &cfDataCreate,
+		"CFRelease":                              &cfRelease,
+		"CGColorSpaceCreateWithName":             &cgColorSpaceCreateNamed,
+		"CGDataProviderCreateWithCFData":         &cgDataProviderFromData,
+		"CGDataProviderRelease":                  &cgDataProviderRelease,
+		"CGImageCreate":                          &cgImageCreate,
+		"CGImageRelease":                         &cgImageRelease,
+		"CGSessionCopyCurrentDictionary":         &cgSessionCurrent,
+		"CGWarpMouseCursorPosition":              &cgWarp,
+		"CGAssociateMouseAndMouseCursorPosition": &cgAssociateMouse,
+		"pthread_main_np":                        &pthreadMainNP,
+		"objc_autoreleasePoolPush":               &poolPush,
+		"objc_autoreleasePoolPop":                &poolPop,
+	} {
+		p, err := purego.Dlsym(purego.RTLD_DEFAULT, name)
+		if err != nil {
+			return false
+		}
+
+		purego.RegisterFunc(fn, p)
+	}
+
+	return true
 }
 
 // nsString returns an autoreleased NSString. The caller needs a pool, or leaks it.

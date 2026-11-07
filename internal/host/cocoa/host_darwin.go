@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-// Package cocoa is a spike of a window host in pure Go on AppKit, reached through purego
-// and the Objective-C runtime, modelled on BUI's kit_window_cocoa.m. The kit renders into
-// a raster in software, so a host only forwards input and presents pixels.
+// Package cocoa is a window host in pure Go on AppKit, reached through purego and the
+// Objective-C runtime, a port of BUI's kit_window_cocoa.m. The kit renders into a raster in
+// software, so a host only forwards input and presents pixels.
 //
-// It opens a window, presents, paces frames and runs Do, but takes no input yet, and has
-// no cursors, clipboard or menu: those belong to the port that the spike decides on.
+// The port isn't finished: it has no menu, live resize or scale changes between screens yet.
 //
 // All of it runs on the main OS thread, which AppKit requires, except Wake. Package bui
 // keeps the main goroutine there.
@@ -21,9 +20,10 @@ import (
 )
 
 const (
-	activationPolicyRegular = 0
-	eventMaskAny            = ^uint64(0)
-	eventTypeAppDefined     = 15
+	activationPolicyRegular    = 0
+	activationPolicyProhibited = 2
+	eventMaskAny               = ^uint64(0)
+	eventTypeAppDefined        = 15
 	// wakeSubtype marks the event that ends a wait in nextEvent, as in the C host.
 	wakeSubtype = 0x4255
 
@@ -51,12 +51,33 @@ type Host struct {
 
 	frameDue time.Time
 	session  int8
+
+	// depth counts the events AppKit is dispatching, and dead holds what they freed.
+	depth int
+	dead  []objc.ID
+
+	ignoreMomentum bool    // a key was pressed since momentum scrolling began
+	keyUpDone      objc.ID // the key-up that dispatch handled, not retained
+	warpTime       float64 // the system uptime of the last warp
+	cursorHidden   bool
+
+	// The app-wide state a test mustn't take from the user: their mouse's buttons, their
+	// clipboard and their focus.
+	buttons    func() uint64
+	pasteboard func() objc.ID
+	noActivate bool
 }
 
 var _ engine.Host = (*Host)(nil)
 
 // New returns a host for kit. It touches neither AppKit nor kit before a window opens.
-func New(kit engine.Kit) *Host { return &Host{kit: kit} }
+func New(kit engine.Kit) *Host {
+	return &Host{
+		kit:        kit,
+		buttons:    func() uint64 { return objc.Send[uint64](clsNSEvent, selPressedButtons) },
+		pasteboard: func() objc.ID { return clsNSPasteboard.Send(selGeneralPasteboard) },
+	}
+}
 
 // Supported implements engine.Host: AppKit needs the main thread and a GUI session.
 func (h *Host) Supported() bool {
@@ -84,7 +105,15 @@ func (h *Host) start() {
 	}
 
 	h.app = clsNSApplication.Send(selSharedApplication)
-	h.app.Send(selSetActivationPolicy, activationPolicyRegular)
+
+	policy := activationPolicyRegular
+	if h.noActivate {
+		// Anything else comes to the front by itself once it waits for events, with no call
+		// asking for it.
+		policy = activationPolicyProhibited
+	}
+
+	h.app.Send(selSetActivationPolicy, policy)
 	h.app.Send(selFinishLaunching)
 	h.ready.Store(true)
 }
@@ -155,6 +184,7 @@ func (h *Host) turn() {
 	}
 
 	h.pump(until)
+	h.releaseDead()
 
 	if h.wakeWanted.Swap(false) {
 		h.drainWake()
@@ -181,7 +211,7 @@ func (h *Host) pump(until objc.ID) {
 		}
 
 		if !isWake(ev) {
-			h.app.Send(selSendEvent, ev)
+			h.dispatch(ev)
 		}
 
 		ev = h.app.Send(selNextEvent, eventMaskAny, objc.ID(0), nsDefaultRunLoopMode, true)
