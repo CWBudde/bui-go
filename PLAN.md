@@ -418,27 +418,52 @@ Notes from the calls and shared tests:
 
 ### Phase 3: Linux window host in Go
 
-- [ ] Pick the X11 client
-  - [ ] Start with `jezek/xgb` (v1.3.1, BSD), pure Go with `shm` and `render` packages
-  - [ ] Check keyboard mapping and `XIM`-free text entry early; fall back to purego over libX11 only if it proves unworkable
-- [ ] Extend `Kit` with the input calls the host needs
-  - [ ] `BK_motion`, `BK_wheel`, `BK_scroll`, `BK_key`, `BK_key_release`, `BK_button`, `BK_context_menu`
-  - [ ] `BK_timer`, `BK_animating`, `BK_needs_render`, `BK_set_scale`, `BK_image_poll`, `BUI_raster_damage`
-  - [ ] The rest of the `BKHost` trampolines: `request`, `set_cursor`, `warp`, clipboard, `schedule`
-- [ ] Port `kit_window_x11.c` (1087 lines)
-  - [ ] Window creation, close button, resize, and `Xft.dpi` scale
-  - [ ] Expose and damage presentation with `PutImage`, then MIT-SHM if frame times call for it
-  - [ ] Cursors from the `BK_CURSOR_*` set, and pointer warp
-  - [ ] Clipboard
-  - [ ] Keysym and text translation for `BK_key` (highest risk)
-  - [ ] Drag and wheel behaviour matching the C host
-- [ ] Build the loop
-  - [ ] One `select` over X events, timers, frame requests and the `Do` wake channel
-  - [ ] Keep the documented panic rule: a panic in a handler or `Do` function in the loop ends the process
-- [ ] Exit
-  - [ ] `CGO_ENABLED=0 go run ./examples/counter` works under a real X session
-  - [ ] `ldd` on that binary reports "not a dynamic executable"
-  - [ ] `xvfb-run -a go test ./...` and `BUI_TEST_XDOTOOL=1 xvfb-run -a go test -run '^TestX' .` pass on the wasm engine
+- [x] Pick the X11 client
+  - [x] Start with `jezek/xgb` (v1.3.1, BSD), pure Go with `shm` and `render` packages
+  - [x] Check keyboard mapping and `XIM`-free text entry early; fall back to purego over libX11 only if it proves unworkable
+- [x] Extend `Kit` with the input calls the host needs
+  - [x] `BK_motion`, `BK_wheel`, `BK_scroll`, `BK_key`, `BK_key_release`, `BK_button`, `BK_context_menu`
+  - [x] `BK_timer`, `BK_animating`, `BK_needs_render`, `BK_set_scale`, `BK_image_poll`, `BUI_raster_damage`
+  - [x] The rest of the `BKHost` trampolines: `request`, `set_cursor`, `warp`, clipboard, `schedule`
+- [x] Port `kit_window_x11.c` (1087 lines)
+  - [x] Window creation, close button, resize, and `Xft.dpi` scale
+  - [x] Expose and damage presentation with `PutImage`. MIT-SHM is not needed yet (see the notes)
+  - [x] Cursors from the `BK_CURSOR_*` set, and pointer warp
+  - [x] Clipboard
+  - [x] Keysym and text translation for `BK_key` (highest risk)
+  - [x] Drag and wheel behaviour matching the C host
+- [x] Build the loop
+  - [x] One `select` over X events, timers, frame requests and the `Do` wake channel
+  - [x] Keep the documented panic rule: a panic in a handler or `Do` function in the loop ends the process
+- [x] Exit
+  - [x] `CGO_ENABLED=0 go run ./examples/counter` works under a real X session. It drew and ticked there, but input was
+        only driven on Xvfb: see "Final verification"
+  - [x] `ldd` on that binary reports "not a dynamic executable"
+  - [x] `xvfb-run -a go test ./...` and `BUI_TEST_XDOTOOL=1 xvfb-run -a go test -run '^TestX' .` pass on the wasm engine
+
+Notes from the host:
+
+- **The keyboard needs no XKB client.** An XKB server presents its keymap through the core request too, with columns for
+  group 1, group 2, then group 1's levels 3 and 4, so AltGr works. Against `XLookupString` and `XKeysymToString` on every
+  keycode under ten modifier states, keysyms and names have no difference on us, de, de nodeadkeys, fr, ru, gr and dvorak
+  (`go test -tags bui_xlibref ./internal/host/x11/`, which needs libX11's headers; layouts other than the current one
+  also need `BUI_TEST_XDOTOOL=1`, as `setxkbmap` changes the server for everyone).
+- **The comparison only covers those seven layouts,** and it knows three key types by rule: letters, keypads, and Print and
+  Pause. A layout with another key type could translate differently. Compose and dead-key sequences do nothing, as in C.
+- **Text is always UTF-8 on the Go host.** The C host's `XLookupString` answers in the locale's encoding, and nothing
+  calls `setlocale`, so typing `ä` natively gives a Latin-1 byte. That is a bug of the C path, not fixed here.
+- **xgb blocks when its queue of 500 events is full, and it reads replies from the same socket.** A UI thread waiting for
+  a reply with nobody reading events would hang forever, so a goroutine moves every event into an unbounded list.
+- **Deliberate differences from the C host:** animation pacing is a due time rather than a sleep, so events and `Do` run
+  meanwhile; a pending wake runs even when frames are due, which an animation starved in C; a layout change rereads the
+  keymap; the pixel format is checked, and a depth other than 24 reports `ErrNoDisplay` where C would fail on `XPutImage`.
+- **Core cursors only.** The cursor font gives the classic shapes, where Xlib would load themed ones through libXcursor.
+- **MIT-SHM waits.** Presenting a full frame took 11.9 ms at 1920x1080 and 1.6 ms at 400x300 (Xvfb, round trip included,
+  100 iterations, load not recorded). A full frame happens on an expose or a resize, and damage covers the rest. Together
+  with the render, a full 1080p frame misses 16 ms, so a tree that animates the whole window would call for SHM; nothing
+  in the API does that today. Phase 4's benchmarks track it.
+- **Xvfb resets when its last client disconnects,** and a connection made during the reset fails, which reads as "no
+  display". `internal/host/x11`'s `TestMain` holds one connection for the whole run for that reason.
 
 ### Phase 4: hardening
 
@@ -483,6 +508,7 @@ Do not start before Phase 3 proves the `Host` interface. Headless works everywhe
 ## Known limits of the cgo-free path
 
 - No GPU window (`BK_window_set_gpu`), software raster only.
+- Core X cursors, not the desktop's cursor theme. No Compose or IME input.
 - No worker threads. Video and the file browser are off. An image source stays pending forever until BUI decodes
   inline when no worker starts (the proposal in "Phase 0 results"); the Go API sets no image sources today.
 - Only the embedded Inter face works by default. Named families need a mount or `BUI_text_add_font`.
