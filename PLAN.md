@@ -5,6 +5,7 @@ Open work for bui-go, as of 2026-11-07. Finished work belongs in `docs/design.md
 ## Where we stand
 
 - [bui-go#7](https://github.com/CWBudde/bui-go/pull/7) is merged, so `main` has the wasm engine and the Go X11 host.
+- [bui-go#8](https://github.com/CWBudde/bui-go/pull/8) is merged, so `main` pins BUI `v0.4.1`.
 - BUI's owner wants the binding in-tree at `bindings/go`. We asked four questions on
   [BUI#8](https://github.com/ppmpreetham/BUI/issues/8#issuecomment-6707514269), about the committed wasm, the second X11 host,
   pinning and tags. **There is no answer yet, and Phase 3 depends on it.**
@@ -33,20 +34,27 @@ None of this depends on the owner's answer.
 
 ## Phase 1: macOS baseline on the MacBook
 
-The MacBook is Apple silicon on macOS 27.2, with Go 1.27.1, CMake and Apple clang. `ninja` is missing, which only matters for building
+The MacBook is an Apple M5 Pro on macOS 27.2, with Go 1.27.1, CMake and Apple clang. `ninja` is missing, which only matters for building
 BUI natively. Use `ssh macbook-ts`: the `macbook` name doesn't resolve from the Linux machine, and the agent must be
-`SSH_AUTH_SOCK=/run/user/1000/gcr/ssh`.
+`SSH_AUTH_SOCK=/run/user/1000/gcr/ssh`. Go and CMake are in `/opt/homebrew/bin`, so run commands through `zsh -lc`. The clone is
+`~/Code/bui-go`. Its `sed` is GNU sed, not BSD sed.
 
 CI only proves that the package passes on `macos-latest`. This phase adds checks CI can't make:
 
-- [ ] Clone `main` and run `go test -count=1 ./...` with and without cgo, on Go 1.27.1 and, via `GOTOOLCHAIN`, on 1.26.8.
-- [ ] Compare a `Headless` render against Linux amd64 by hash. The golden test should already cover this, so confirm it runs here
-      rather than skips.
-- [ ] Run `bench/` for arm64 numbers, and add them to `docs/design.md`. The published numbers are all from an amd64 laptop.
-- [ ] Establish how a GUI program started over SSH reaches the logged-in session, for example with `launchctl asuser`. Phase 2's
-      tests depend on this.
+- [x] Clone `main` and run `go test -count=1 ./...` with and without cgo, on Go 1.27.1 and, via `GOTOOLCHAIN`, on 1.26.8. (2026-11-07) —
+      all four runs at `a06371a` pass, with 329 passes and the same 54 skips.
+- [x] Compare a `Headless` render against Linux amd64 by hash. The golden test should already cover this, so confirm it runs here
+      rather than skips. (2026-11-07) — `TestGoldenPinned` runs and passes, and fails when the first or last pinned hash is changed.
+- [x] Run `bench/` for arm64 numbers, and add them to `docs/design.md`. The published numbers are all from an amd64 laptop. (2026-11-07)
+      — `bench/2026-11-07-a06371a.txt`, wasm only, as the native engine needs Linux amd64. `scripts/bench.sh` now records the load on macOS.
+- [x] Establish how a GUI program started over SSH reaches the logged-in session, for example with `launchctl asuser`. Phase 2's
+      tests depend on this. (2026-11-07) — running it directly works, as does `launchctl bootstrap gui/501`; `launchctl asuser` without
+      `sudo` fails with "Operation not permitted". Tried only while logged in at the console.
 - [ ] List the macOS permissions tests need: Screen Recording for screenshots, Accessibility for synthetic input. Christian grants
-      these in System Settings. An agent must not change them.
+      these in System Settings. An agent must not change them. (2026-11-07) — partial: without grants, both preflights return 0,
+      capturing the probe's own window fails, and a key event to its own pid doesn't arrive. What remains is below.
+- [ ] Rerun the permission probe once Christian has granted both permissions, to confirm each one fixes its failure, which process
+      each grant attaches to (direct and `launchctl bootstrap`), and whether it survives a rebuild of an unsigned binary.
 
 The module itself still gets built on Linux only, because only the Linux x86_64 wasi-sdk is pinned.
 
