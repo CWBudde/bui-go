@@ -72,7 +72,7 @@ func testEvalNumber(h *harness) {
 		}
 	}
 
-	// PLAN.md documents that 1/(1/0) differs between engines, so it is not here.
+	// docs/design.md, "EvalNumber": 1/(1/0) differs between engines, so it is not here.
 	for _, expr := range []string{"", " ", "1+", "(", "1 2", "no_such_name", "sqrt(", "1/0", "sqrt(-1)", "log(0)"} {
 		if v, ok := h.k.EvalNumber(expr); ok {
 			h.t.Errorf("EvalNumber(%q) = %v, want a failure", expr, v)

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 # Builds BUI's C kit at the commit pinned in BUI_COMMIT as a WebAssembly
-# reactor module for wazero (PLAN.md, "a cgo-free path"), with a pinned
+# reactor module for wazero, with a pinned
 # wasi-sdk. Outputs, under the gitignored build/wasm/out:
 #
 #   bui_kit.wasm     kit + gpu + core + wasm/shim.c, exports in wasm/exports.txt;
@@ -83,11 +83,11 @@ fi
 # the only ones wazero implements. LLVM still defaults to the legacy ones.
 eh_flags=(-mllvm -wasm-enable-sjlj -mllvm -wasm-use-legacy-eh=false)
 # SIMD (in wazero's CoreFeaturesV2) lets the raster loops vectorize as they do
-# natively with SSE; PLAN.md has the measured effect.
+# natively with SSE; docs/design.md, "What the build changed", has the measured effect.
 # wasm/compat.h fills libc gaps without touching the BUI tree.
 common_flags=("-ffile-prefix-map=$root=." -msimd128 "${eh_flags[@]}" -include "$root/wasm/compat.h")
 # The stack goes first, so an overflow traps at address 0 instead of silently
-# overwriting data. Nested emits share it. Measured peak: see PLAN.md.
+# overwriting data. Nested emits share it. Measured peak: docs/design.md, "Stack".
 stack_size=$((1024 * 1024))
 link_flags=(
 	-mexec-model=reactor

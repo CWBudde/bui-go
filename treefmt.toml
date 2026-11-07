@@ -14,8 +14,6 @@ excludes = [
   "**/.gitignore",
   "go.mod",
   "go.sum",
-  # working notes
-  "PLAN.md",
 ]
 
 ### Misc

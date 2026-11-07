@@ -6,7 +6,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 module="$root/internal/engine/wasmengine/bui_kit.wasm"
-budget=$((8 * 1024 * 1024)) # PLAN.md, Phase 0's go criteria
+budget=$((8 * 1024 * 1024)) # docs/design.md, "Feasibility criteria"
 
 "$root/scripts/build-wasm.sh"
 

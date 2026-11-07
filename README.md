@@ -41,7 +41,8 @@ pixels: the tests compare them exactly. On Windows and macOS the wasm engine run
 **Speed.** On amd64 and arm64 wazero compiles the module, which renders at about 2-4x native time and handles a hover at
 about 1.2-3x. A full 1920x1080 frame takes about 13 ms when the machine is not loaded. Other architectures use wazero's
 interpreter, at 100-1000x native: a small tree renders in about 36 ms and a dense full-HD frame in over a second, so they
-are for correctness rather than interaction. `PLAN.md` has the measurements, and `scripts/bench.sh` records new ones.
+are for correctness rather than interaction. [`docs/design.md`](docs/design.md) has the measurements, and `scripts/bench.sh`
+records new ones.
 
 **Compilation cache.** The first start compiles the module, which takes about 0.2-0.3 s. The result is cached in
 `os.UserCacheDir()/bui-go/wazero`, which brings later starts to about 25 ms. A cache that cannot be read or written costs only

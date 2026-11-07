@@ -219,7 +219,7 @@ func (leakHost) ClipboardSet(string)          {}
 func (leakHost) Schedule(int, int)            {}
 
 // The kit keeps a copy of a text field's old text in the context's undo history, and
-// BK_context_free does not release it (PLAN.md, Phase 6 notes). It is the kit's own code,
+// BK_context_free does not release it (docs/design.md, "Leaks"). It is the kit's own code,
 // and it costs that text once per context closed after an edit. A long string shows it.
 // This pins the cost, and if a kit update fixes it this fails, so that the note can go.
 func TestKnownLeakOfUndoHistory(t *testing.T) {

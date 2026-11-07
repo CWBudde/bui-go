@@ -86,8 +86,7 @@ func (m *module) call(name string, params ...uint64) uint64 {
 
 // scratch returns this level's buffer, holding at least n bytes. It is valid until
 // the next scratch call at this level, and what it held before does not survive
-// growing. malloc returning 0 is fatal for now: PLAN.md, Phase 4, decides what to do
-// past the memory limit.
+// growing. malloc returning 0 is fatal: docs/design.md, "Out of memory".
 func (m *module) scratch(n uint64) uint32 {
 	l := m.level()
 	if n <= uint64(l.scratchSize) {

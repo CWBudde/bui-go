@@ -6,7 +6,7 @@
 #
 #   scripts/bench.sh [count]   writes bench/<date>-<commit>.txt
 #
-# Native times move with the machine's load by up to 3x (PLAN.md, Phase 0 results), so
+# Native times move with the machine's load by up to 3x (docs/design.md, "Speed"), so
 # only ratios from the same run mean much. The load goes in the file for that reason.
 set -euo pipefail
 

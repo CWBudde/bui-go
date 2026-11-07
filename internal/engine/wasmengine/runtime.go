@@ -35,7 +35,7 @@ const (
 
 	// maxCompileWorkers keeps a cold start from swamping the machine, for instance
 	// when many test binaries start at once. Four workers already give most of the
-	// gain (PLAN.md, Phase 0 results).
+	// gain (docs/design.md, "Startup").
 	maxCompileWorkers = 4
 )
 
