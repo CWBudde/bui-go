@@ -455,7 +455,7 @@ events, cursors, `Warp` and the clipboard. Command maps to Ctrl, as Blender's ma
   which a test app can't have: tests run under the prohibited activation policy, as anything else comes to the front by itself
   once it waits for events, and took focus from the user's editor for seconds during a run. A middle button and scrolling go to the
   view directly, as `NSEvent` can't make them for a window.
-- **Each test fails when its handler is broken.** All 40 handler breaks tried failed their test, run on the MacBook.
+- **Each test fails when its handler is broken.** All 45 handler breaks tried failed their test, run on the MacBook.
 - **What tests don't reach:** the real clipboard (they use a private pasteboard), a real warp, which would move the user's pointer,
   `pressedMouseButtons`, and activation, which the tests turn off. A hand on the MacBook is the check left for those.
 - **One change from the C host:** BUI clamps the cursor to 0-7, which hides the pointer for `BK_CURSOR_NESW` and everything after
