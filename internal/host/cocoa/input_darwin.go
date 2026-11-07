@@ -305,6 +305,11 @@ func addTracking(view objc.ID) {
 
 // dispatch sends an event on through AppKit, with the two exceptions of the C host.
 func (h *Host) dispatch(ev objc.ID) {
+	// AppKit is inside the event from here on, also while this handles it itself.
+	h.depth++
+
+	defer func() { h.depth-- }()
+
 	switch objc.Send[uint64](ev, selType) {
 	case eventKeyDown:
 		// Control and Tab never reach the view, as AppKit moves between views with them.
@@ -327,9 +332,7 @@ func (h *Host) dispatch(ev objc.ID) {
 		}
 	}
 
-	h.depth++
 	h.app.Send(selSendEvent, ev)
-	h.depth--
 	h.keyUpDone = 0
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -56,6 +57,10 @@ var (
 	selScrollWheel   = objc.RegisterName("scrollWheel:")
 	selOtherDown     = objc.RegisterName("otherMouseDown:")
 	selOtherUp       = objc.RegisterName("otherMouseUp:")
+	selKeyUp         = objc.RegisterName("keyUp:")
+	selBecomeKey     = objc.RegisterName("windowDidBecomeKey:")
+	selDelegate      = objc.RegisterName("delegate")
+	selNotification  = objc.RegisterName("notificationWithName:object:")
 	selMouseExited   = objc.RegisterName("mouseExited:")
 	selUnique        = objc.RegisterName("pasteboardWithUniqueName")
 )
@@ -141,11 +146,19 @@ func (f *inputFixture) mouse(kind uint64, x, y int, flags uint64, button int64) 
 	f.send(ev)
 }
 
-// keyEvent packs the last two arguments into one word. They go on the stack, where macOS on
-// arm64 packs them by size (isARepeat at 0, keyCode at 2), and purego gives each 8 bytes.
+// keyEvent's last two arguments go on the stack. On arm64 macOS packs them by size (isARepeat
+// at 0, keyCode at 2), while purego gives each 8 bytes, so there they share one word. On amd64
+// each has a slot of its own.
 func (f *inputFixture) keyEvent(kind uint64, code uint16, chars, ignoring string, flags uint64) objc.ID {
-	return clsNSEvent.Send(selKeyEvent, kind, nsPoint{}, flags, f.now(),
-		objc.Send[int64](f.win.nswin, selWindowNumber), objc.ID(0), nsString(chars), nsString(ignoring), uint64(code)<<16)
+	window := objc.Send[int64](f.win.nswin, selWindowNumber)
+
+	if runtime.GOARCH == "amd64" {
+		return clsNSEvent.Send(selKeyEvent, kind, nsPoint{}, flags, f.now(), window, objc.ID(0),
+			nsString(chars), nsString(ignoring), false, code)
+	}
+
+	return clsNSEvent.Send(selKeyEvent, kind, nsPoint{}, flags, f.now(), window, objc.ID(0),
+		nsString(chars), nsString(ignoring), uint64(code)<<16)
 }
 
 // key sends a press and a release of a key.
@@ -733,8 +746,15 @@ func TestDispatchHandlesWhatNSAppSwallows(t *testing.T) {
 		pool := poolPush()
 		defer poolPop(pool)
 
-		f.h.dispatch(f.keyEvent(eventKeyUp, keyQ, "q", "q", flagCommand))
+		up := f.keyEvent(eventKeyUp, keyQ, "q", "q", flagCommand)
+		f.h.dispatch(up)
 		f.h.dispatch(f.keyEvent(eventKeyDown, keyCodeTab, "\t", "\t", flagControl))
+
+		// A key-up NSApp does pass on, while dispatch is still in it, is not a second release.
+		// A test app has no key window, so the view gets it here as NSApp would hand it over.
+		f.h.keyUpDone = up
+		f.win.view.Send(selKeyUp, up)
+		f.h.keyUpDone = 0
 
 		want := []string{"-q", "+Tab"}
 		if !slices.Equal(spy.keys, want) {
@@ -1159,7 +1179,13 @@ func TestWindowFreedFromItsOwnEvent(t *testing.T) {
 			t.Errorf("%d windows waiting for release inside the event, want 1", queued)
 		}
 
-		f.h.releaseDead()
+		// The next turn releases it. A wake keeps that turn from waiting.
+		f.h.Wake()
+		f.h.turn()
+
+		if len(f.h.dead) != 0 {
+			t.Errorf("%d windows still waiting after a turn", len(f.h.dead))
+		}
 
 		if !weak.gone(f.h, 2*time.Second) {
 			t.Error("the NSWindow is still alive")
@@ -1204,4 +1230,28 @@ func TestChildProcess(t *testing.T) {
 	})
 
 	t.Error("the process survived")
+}
+
+// Modifiers released in another application leave no stale state: becoming key again
+// rereads them, or the next press of that modifier would reach the kit as nothing.
+func TestBecomingKeyRereadsTheModifiers(t *testing.T) {
+	requireDisplay(t)
+
+	onMain(func() {
+		f := openInput(t, "button", 100, 40)
+		defer f.close()
+
+		pool := poolPush()
+		defer poolPop(pool)
+
+		now := objc.Send[uint64](clsNSEvent, selModifierFlags)
+		f.win.flags = now ^ flagCommand
+
+		note := objc.ID(objc.GetClass("NSNotification")).Send(selNotification, nsString("NSWindowDidBecomeKeyNotification"), f.win.nswin)
+		f.win.nswin.Send(selDelegate).Send(selBecomeKey, note)
+
+		if f.win.flags != now {
+			t.Errorf("flags %#x after becoming key, want %#x", f.win.flags, now)
+		}
+	})
 }

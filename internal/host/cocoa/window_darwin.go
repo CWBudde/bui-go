@@ -128,9 +128,19 @@ func registerDelegate() bool {
 		})
 	}
 
+	// Modifiers released while another application was in front sent no flagsChanged here.
+	onBecomeKey := func(_ objc.ID, _ objc.SEL, note objc.ID) {
+		guarded(func() {
+			if win := current.findNS(note.Send(selObject)); win != nil {
+				win.flags = objc.Send[uint64](clsNSEvent, selModifierFlags)
+			}
+		})
+	}
+
 	cls, err := objc.RegisterClass("BUIGoWindowDelegate", objc.GetClass("NSObject"), nil, nil, []objc.MethodDef{
 		{Cmd: objc.RegisterName("windowWillClose:"), Fn: onClose},
 		{Cmd: objc.RegisterName("windowDidResize:"), Fn: onResize},
+		{Cmd: objc.RegisterName("windowDidBecomeKey:"), Fn: onBecomeKey},
 	})
 	if err != nil {
 		return false
