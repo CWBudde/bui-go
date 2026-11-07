@@ -99,8 +99,15 @@ func FuzzSetStr(f *testing.F) {
 // server: into a focused text field, and the two engines must then hold the same text.
 func FuzzKeyInput(f *testing.F) {
 	for _, seed := range [][2]string{
-		{"a", "a"}, {"", "BackSpace"}, {"ä", "adiaeresis"}, {"\xff", "a"}, {"", ""}, {"", "NoSuchKey"},
-		{"€", "U20AC"}, {"a\x00b", "a"}, {strings.Repeat("x", 300), "x"},
+		{"a", "a"},
+		{"", "BackSpace"},
+		{"ä", "adiaeresis"},
+		{"\xff", "a"},
+		{"", ""},
+		{"", "NoSuchKey"},
+		{"€", "U20AC"},
+		{"a\x00b", "a"},
+		{strings.Repeat("x", 300), "x"},
 	} {
 		f.Add(seed[0], seed[1])
 	}

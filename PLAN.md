@@ -385,8 +385,7 @@ Notes from the runtime work:
   wazero has no compiler there, so the default configuration chose the interpreter by itself.
 - **Compile workers, through `load`:** a median of 274 ms cold (12 runs, four workers) against 720 ms with wazero's default
   of one. No test can see the worker count, so this is a measurement, not a regression test.
-- **The memory limit is 16384 pages (1 GiB).** Past it `malloc` returns 0 with no trap. Phase 4 decides what the binding
-  does then.
+- **The memory limit is 16384 pages (1 GiB).** Past it `malloc` returns 0 with no trap, and Phase 4 made that fatal.
 - **The module is byte-identical on rebuild.** `build-wasm.sh` now copies it into the package, and re-running the script
   leaves `git status` clean in this checkout.
 
@@ -462,9 +461,8 @@ Notes from the host:
   keymap; the pixel format is checked, and a depth other than 24 reports `ErrNoDisplay` where C would fail on `XPutImage`.
 - **Core cursors only.** The cursor font gives the classic shapes, where Xlib would load themed ones through libXcursor.
 - **MIT-SHM waits.** Presenting a full frame took 11.9 ms at 1920x1080 and 1.6 ms at 400x300 (Xvfb, round trip included,
-  100 iterations, load not recorded). A full frame happens on an expose or a resize, and damage covers the rest. Together
-  with the render, a full 1080p frame misses 16 ms, so a tree that animates the whole window would call for SHM; nothing
-  in the API does that today. Phase 4's benchmarks track it.
+  100 iterations, load not recorded); Phase 4 has it at 3.8 ms on a quieter machine. A full frame happens on an expose or
+  a resize, and damage covers the rest, so nothing in the API calls for SHM today.
 - **`internal/host/x11`'s tests start their own Xvfb.** On a shared display, windows of a test binary running in parallel
   cover theirs and show in the pixels they read back, and clipboards collide, which `go test ./...` hit under load. With a
   server of their own they can also change the layout and send real input, and never open windows on a desktop. Without
@@ -472,18 +470,54 @@ Notes from the host:
 
 ### Phase 4: hardening
 
-- [ ] Performance
-  - [ ] Benchmark render, hover and event latency on both engines, with results tracked over time
-  - [ ] Avoid allocation per kit call
-- [ ] Memory
-  - [ ] Add a leak test for create/close loops, comparing module memory after a warm-up
-  - [ ] Test resize loops, because linear memory never shrinks, and document that
-  - [ ] Decide what an out-of-memory `malloc` does once it hits the page limit
-- [ ] Failure behaviour
-  - [ ] Test a panic and a `Goexit` in a handler on the wasm engine (the `TestPanicAcrossCFramesExits` equivalent)
-  - [ ] Test that a kit trap ends the process with a useful message
-  - [ ] Document that wasm has no guard pages, so a NULL read or a bad offset inside the module may go undetected
-- [ ] Fuzz `SetStr` and `EvalNumber` inputs on both engines, and compare the results
+- [x] Performance
+  - [x] Benchmark render, hover and event latency on both engines, with results tracked over time
+  - [x] Avoid allocation per kit call
+- [x] Memory
+  - [x] Add a leak test for create/close loops, comparing module memory after a warm-up
+  - [x] Test resize loops, because linear memory never shrinks, and document that
+  - [x] Decide what an out-of-memory `malloc` does once it hits the page limit
+- [x] Failure behaviour
+  - [x] Test a panic and a `Goexit` in a handler on the wasm engine (the `TestPanicAcrossCFramesExits` equivalent)
+  - [x] Test that a kit trap ends the process with a useful message
+  - [x] Document that wasm has no guard pages, so a NULL read or a bad offset inside the module may go undetected
+- [x] Fuzz `SetStr` and `EvalNumber` inputs on both engines, and compare the results
+
+Notes from this phase:
+
+- **Numbers** (`scripts/bench.sh`, files in `bench/`; compare with benchstat; 200 iterations, three runs, load falling
+  from 14 to 5, so only ratios mean much):
+
+  | Measurement                 | native  | wasm compiler | ratio |
+  | --------------------------- | ------- | ------------- | ----- |
+  | Render, counter 400x300     | 92 µs   | 308 µs        | 3.4x  |
+  | Render, dense 1920x1080     | 4.0 ms  | 9.5 ms        | 2.4x  |
+  | Hover and leave, counter    | 74 µs   | 104 µs        | 1.4x  |
+  | Hover and leave, dense      | 70 µs   | 83 µs         | 1.2x  |
+  | Press and release to a Go handler | 322 ns | 756 ns   | 2.3x  |
+  | `SetNum`                    | 262 ns  | 268 ns        | 1.0x  |
+
+  Presenting took 342 µs at 400x300 and 3.8 ms at 1920x1080 in the same run, against the 1.6 and 11.9 ms of the busier
+  run in Phase 3. So a full 1080p frame, render plus present, took about 13 ms: this fits 16 ms when the machine is not
+  loaded, and MIT-SHM stays unneeded.
+- **Press and release in the click benchmark are cheap because nothing renders in between.** It measures the crossing
+  into a handler and back, not a whole click as a user sees it.
+- **Hot calls do not allocate.** `TestHotCallsDoNotAllocate` and `TestEmitDoesNotAllocate` hold it at 0 for input, render,
+  properties and an emit with a call from its handler. `RasterDamage` allocates its result, once per damaged frame.
+- **No leaks, by the only measure there is.** 2000 create/close cycles of a tree with a window host, a raster, input and
+  an edit grow memory by nothing, and neither do resize cycles up to 1200x900. Linear memory never shrinks, so a test sees
+  only growth, and a leak under about 30 bytes per cycle would hide in a 64 KiB page. The peak stays for the process's
+  life: one large window keeps its raster's size in memory after it closes.
+- **Out of memory is fatal.** Past the 1 GiB limit `malloc` returns NULL and the kit does not check, and in the module a
+  NULL write hits the stack's bottom with nothing to stop it. `wasm/compat.c` wraps `malloc`, `calloc` and `realloc` with
+  `--wrap` and traps, after a message on stderr. The export Go calls stays unwrapped, so Go reports its own size. So a
+  huge image or string ends the process, as a trap does anywhere else, rather than corrupting it.
+- **Failure paths on the wasm engine.** `TestPanicAcrossCFramesExits` passes with `-tags bui_nocgo`, with panic and `Goexit`;
+  `TestKitFatalPathsExit` covers traps, also from inside a handler; `internal/host/x11` covers a panic in a `Do` function in
+  the loop, and a broken connection, which ends the process with status 1 as Xlib's default handler does.
+- **The fuzz runs found no difference,** at 40 s each: `FuzzEvalNumber` 548k executions, `FuzzSetStr` 1.76M, `FuzzKeyInput`
+  217k (`go test -fuzz` in `internal/enginetest`, which needs cgo). `FuzzEvalNumber` accepts native failing where wasm succeeds,
+  the documented inf-or-nan case, so a real bug of that exact shape would pass. It compares numbers to 1e-9, relative.
 
 ### Phase 5: other platforms (separate, optional)
 
@@ -513,6 +547,11 @@ Do not start before Phase 3 proves the `Host` interface. Headless works everywhe
 ## Known limits of the cgo-free path
 
 - No GPU window (`BK_window_set_gpu`), software raster only.
+- No guard pages. In the module a NULL read or a bad offset returns whatever memory holds and a write overwrites it, where
+  native code would crash; only an access past the end of memory traps. `live()` in package `bui` guards the binding's own
+  references, but a bug inside the kit can go undetected here that would crash natively.
+- Linear memory never shrinks: the largest raster or string a process had stays in its footprint. Past 1 GiB the process
+  ends.
 - Core X cursors, not the desktop's cursor theme. No Compose or IME input.
 - No worker threads. Video and the file browser are off. An image source stays pending forever until BUI decodes
   inline when no worker starts (the proposal in "Phase 0 results"); the Go API sets no image sources today.

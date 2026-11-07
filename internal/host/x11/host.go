@@ -11,6 +11,8 @@ package x11
 import (
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"slices"
 	"strconv"
@@ -75,6 +77,13 @@ var _ engine.Host = (*Host)(nil)
 // atoms are the interned names the host needs, once connected.
 type atoms struct {
 	delete, protocols, clipboard, utf8, targets, selection, netWMName xproto.Atom
+}
+
+// init quiets xgb's own log, which says "could not get authority info" on every
+// connection without an Xauthority file, though most then work: Xvfb needs none. What
+// matters reaches the caller as ErrNoDisplay, or stderr through the event queue.
+func init() {
+	xgb.Logger = log.New(io.Discard, "", 0)
 }
 
 // New returns a host for kit. It does not connect yet, and it never calls kit before a
