@@ -50,12 +50,9 @@ CI only proves that the package passes on `macos-latest`. This phase adds checks
 - [x] Establish how a GUI program started over SSH reaches the logged-in session, for example with `launchctl asuser`. Phase 2's
       tests depend on this. (2026-11-07) — running it directly works, as does `launchctl bootstrap gui/501`; `launchctl asuser` without
       `sudo` fails with "Operation not permitted". Tried only while logged in at the console.
-- [ ] List the macOS permissions tests need: Screen Recording for screenshots, Accessibility for synthetic input. Christian grants
-      these in System Settings. An agent must not change them. (2026-11-07) — partial: without grants, both preflights return 0,
-      capturing the probe's own window fails, and a key event to its own pid doesn't arrive. What remains is below.
-- [ ] Rerun the permission probe from a binary at a stable path once Christian has granted it both permissions, to confirm each one
-      fixes its failure, which process each grant attaches to (direct and `launchctl bootstrap`), and whether it survives a rebuild
-      (compare `codesign -dvvv` code hashes). A first grant, to a build since deleted, didn't reach a rebuild in a new directory.
+- [x] List the macOS permissions tests need: Screen Recording for screenshots, Accessibility for synthetic input. Christian grants
+      these in System Settings. An agent must not change them. (2026-11-07) — confirmed with a probe, without and with both grants.
+      Grants only apply through `launchctl bootstrap gui/501`, not started directly from SSH, and hold for one binary at one path.
 
 The module itself still gets built on Linux only, because only the Linux x86_64 wasi-sdk is pinned.
 
@@ -69,6 +66,8 @@ the full port until the owner has answered.
 
 **Spike, in a time-boxed branch:**
 
+- [ ] Decide how permission tests get a fixed binary, because `go test` builds a new one each time and each new binary loses its
+      grants: for example `go test -c` to a fixed path run as an agent, or a real signing identity, which is untried.
 - [ ] Add `github.com/ebitengine/purego` and check that the cross-build from Linux with `CGO_ENABLED=0` still works.
 - [ ] Pin AppKit to the main thread. Run it from `init` with `runtime.LockOSThread`, and check that this fits `Do`, `Wake` and the
       kit's calling rules in `engine.Host`.

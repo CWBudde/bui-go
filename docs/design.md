@@ -393,15 +393,16 @@ On 2026-11-07, at `a06371a`, on an Apple M5 Pro with macOS 27.2, over SSH:
   `launchctl bootstrap gui/501` with a temporary plist. `launchctl asuser 501`, run as that user without `sudo`, fails with
   "Operation not permitted" when switching audit session. Neither working method took focus from the user (`NSApp.isActive` stayed 0), as the probe is an
   accessory app that orders itself front.
-- **With no permissions granted,** started either way, `CGPreflightScreenCaptureAccess` and `AXIsProcessTrusted` both return 0.
-  `screencapture -l` on the probe's own window fails with "could not create image from window", and a key event sent to its own pid
-  with `CGEventPostToPid` doesn't arrive. So Screen Recording is the likely need for screenshots, and Accessibility for synthetic
-  input. Neither has been run with a grant, so neither cause is confirmed. That also leaves open which process a grant attaches
-  to in each launch method.
-- **A grant may not survive a rebuild.** After the user granted access to one build of the probe, which was then deleted, a rebuild
-  from the same source in a new directory still got 0 from both preflights, started either way. The probe is ad-hoc signed. Which
-  permission that grant covered wasn't recorded, and neither was whether the two builds had the same code hash, so this isn't yet
-  a cause. Plan for tests to need a stable binary, or a new grant after each rebuild, until a rerun shows otherwise.
+- **Screenshots need Screen Recording and synthetic input needs Accessibility.** Without grants, `CGPreflightScreenCaptureAccess`
+  and `AXIsProcessTrusted` return 0, `screencapture -l` on the probe's own window fails with "could not create image from window",
+  and a key event sent to its own pid with `CGEventPostToPid` doesn't arrive. With both granted, both return 1, the capture shows the
+  window's red, and the event arrives.
+- **Only `launchctl bootstrap gui/501` gets the grants.** The same binary started directly from SSH still reads 0 for both and fails
+  both actions. So a test that needs a permission has to run as an agent in the GUI domain; a test that only opens a window doesn't.
+- **A grant holds for one binary at one path.** On this ad-hoc signed binary it was lost with the same code hash at another path, and
+  with a different hash at the granted path, and it came back when the granted binary was restored. Rebuilding the same source in
+  another directory also changed the hash. `go test` builds a new binary each time, so tests that need a permission need a fixed
+  binary and a new grant whenever it changes. Whether a real signing identity avoids that hasn't been tried.
 
 ## Known limits
 
