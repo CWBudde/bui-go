@@ -9,7 +9,4 @@ import (
 	"github.com/CWBudde/bui-go/internal/engine/wasmengine"
 )
 
-var (
-	kit  engine.Kit  = wasmengine.Kit{}
-	host engine.Host = wasmengine.Host{}
-)
+var kit engine.Kit = wasmengine.Kit{}

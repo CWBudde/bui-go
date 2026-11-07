@@ -4,9 +4,9 @@ package wasmengine
 
 import "github.com/CWBudde/bui-go/internal/engine"
 
-// Host is the window system of a build without one yet: windows are unsupported,
+// Host is the window system of a platform without a Go host: windows are unsupported,
 // so package bui's Run reports ErrNoDisplay. It never touches the module, so its
-// calls cost nothing, and Phase 3 replaces it with a Go host.
+// calls cost nothing.
 type Host struct{}
 
 var _ engine.Host = Host{}
