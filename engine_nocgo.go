@@ -4,13 +4,12 @@
 
 package bui
 
-import "github.com/CWBudde/bui-go/internal/engine"
-
-// Phase 2 of PLAN.md selects the wasm engine here. Until then this fails the build
-// on purpose, as a build without cgo always has, rather than panicking at run time.
-var _ = wasmEngineArrivesInPhase2
+import (
+	"github.com/CWBudde/bui-go/internal/engine"
+	"github.com/CWBudde/bui-go/internal/engine/wasmengine"
+)
 
 var (
-	kit  engine.Kit
-	host engine.Host
+	kit  engine.Kit  = wasmengine.Kit{}
+	host engine.Host = wasmengine.Host{}
 )
