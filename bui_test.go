@@ -1319,3 +1319,89 @@ func TestNodeIDWrapSkipsZeroAndLive(t *testing.T) {
 		t.Fatal("the wrap took the id of a live node")
 	}
 }
+
+// Real key events, through the server's keymap: what the host's translation is for.
+func xTypeInto(t *testing.T, title string, keys ...string) string {
+	t.Helper()
+
+	root, text, win := xWindow(t, "text", title)
+
+	var got string
+
+	xWhenLaidOut(t, text, title, func(id string, x, y, w, h int) {
+		xdotool(t, "mousemove", "--window", id, strconv.Itoa(x+w/2), strconv.Itoa(y+h/2))
+		xdotool(t, "click", "1")
+		time.Sleep(50 * time.Millisecond)
+
+		for _, k := range keys {
+			xdotool(t, append([]string{"type", "--delay", "20"}, k)...)
+		}
+
+		xdotool(t, "key", "Return")
+		time.Sleep(100 * time.Millisecond)
+		Do(func() {
+			got = text.Str("text")
+
+			Quit()
+		})
+	})
+
+	if err := Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	win.Close()
+	root.Close()
+
+	return got
+}
+
+func TestXTypingASCII(t *testing.T) {
+	if got := xTypeInto(t, "bui-go x type", "Hello, W0rld!@#"); got != "Hello, W0rld!@#" {
+		t.Errorf("typed %q", got)
+	}
+}
+
+// The wheel, with a real Ctrl held, steps a slider on every engine.
+func TestXWheelStepsASlider(t *testing.T) {
+	const title = "bui-go x wheel"
+
+	root, slider, win := xWindow(t, "slider", title)
+
+	if err := slider.SetNum("min", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := slider.SetNum("max", 100); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := slider.SetNum("value", 50); err != nil {
+		t.Fatal(err)
+	}
+
+	var got float64
+
+	xWhenLaidOut(t, slider, title, func(id string, x, y, w, h int) {
+		xdotool(t, "mousemove", "--window", id, strconv.Itoa(x+w/2), strconv.Itoa(y+h/2))
+		time.Sleep(50 * time.Millisecond)
+		xdotool(t, "keydown", "ctrl", "click", "4", "keyup", "ctrl")
+		time.Sleep(100 * time.Millisecond)
+		Do(func() {
+			got = slider.Num("value")
+
+			Quit()
+		})
+	})
+
+	if err := Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	win.Close()
+	root.Close()
+
+	if got <= 50 {
+		t.Errorf("the wheel left the value at %v", got)
+	}
+}
