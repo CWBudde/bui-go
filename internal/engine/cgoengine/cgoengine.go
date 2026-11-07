@@ -220,7 +220,7 @@ func (Kit) Press(ctx engine.Context, x, y int) {
 
 // Release implements engine.Kit.
 func (Kit) Release(ctx engine.Context, x, y int) {
-	C.BK_release(context(ctx), C.int(x), C.int(y), C.BK_BUTTON1)
+	C.BK_release(context(ctx), C.int(x), C.int(y), 0)
 }
 
 // PressMods implements engine.Kit.

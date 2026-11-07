@@ -230,8 +230,8 @@ func TestPressPassesTheButtonAndRenderIsFull(t *testing.T) {
 	ctx, _, x, y := clickableButton(t, k)
 	clickAt(k, ctx, x, y)
 
-	if !slices.Equal(mods, []uint64{8, 8}) {
-		t.Errorf("press and release passed modifiers %v, want BK_BUTTON1", mods)
+	if !slices.Equal(mods, []uint64{8, 0}) {
+		t.Errorf("press and release passed modifiers %v, want BK_BUTTON1 on the press only", mods)
 	}
 
 	if full != 1 {

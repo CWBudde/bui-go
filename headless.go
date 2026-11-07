@@ -2,7 +2,11 @@
 
 package bui
 
-import "github.com/CWBudde/bui-go/internal/engine"
+import (
+	"fmt"
+
+	"github.com/CWBudde/bui-go/internal/engine"
+)
 
 // context is a BKContext with the emit-only host, shared by Window and
 // Headless.
@@ -20,7 +24,12 @@ func newContext(root *Node) *context {
 		panic("bui: node is already the root of a Window or Headless")
 	}
 
-	ctx := &context{c: kit.ContextNew(c), root: root}
+	handle := kit.ContextNew(c)
+	if handle == 0 {
+		panic("bui: cannot create a context")
+	}
+
+	ctx := &context{c: handle, root: root}
 	kit.ContextSetEmitHost(ctx.c)
 	root.owner = ctx
 
@@ -43,15 +52,27 @@ type Headless struct {
 	w, h int
 }
 
+// maxHeadlessPixels is 256 MiB of raster, or 8192 x 8192. The wasm engine's limit is near
+// twice that, where the kit ends the process, and the native one crashes or hangs on far
+// larger sizes. This leaves the module room for everything else it holds.
+const maxHeadlessPixels = 1 << 26
+
 // NewHeadless creates a context on root with a w x h raster. Close it before
-// closing root.
+// closing root. It panics on a size that is not positive or is too large for a raster.
 func NewHeadless(root *Node, w, h int) *Headless {
-	return &Headless{
-		ctx: newContext(root),
-		r:   kit.RasterNew(w, h),
-		w:   w,
-		h:   h,
+	if w <= 0 || h <= 0 || w > maxHeadlessPixels/h {
+		panic(fmt.Sprintf("bui: Headless size %d x %d is out of range", w, h))
 	}
+
+	ctx := newContext(root)
+
+	r := kit.RasterNew(w, h)
+	if r == 0 {
+		ctx.free()
+		panic(fmt.Sprintf("bui: cannot create a raster of %d x %d", w, h))
+	}
+
+	return &Headless{ctx: ctx, r: r, w: w, h: h}
 }
 
 func (h *Headless) live() engine.Context {

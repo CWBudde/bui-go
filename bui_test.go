@@ -1412,3 +1412,35 @@ func TestXWheelStepsASlider(t *testing.T) {
 		t.Errorf("the wheel left the value at %v", got)
 	}
 }
+
+func TestNewHeadlessRefusesBadSizes(t *testing.T) {
+	root := NewNode("frame")
+	defer root.Close()
+
+	for _, size := range [][2]int{{0, 10}, {10, 0}, {-1, 10}, {10, -1}, {100000, 100000}, {1 << 30, 1 << 30}, {1 << 62, 4}} {
+		mustPanic(t, "NewHeadless with a bad size", func() { NewHeadless(root, size[0], size[1]) })
+	}
+
+	// Nothing stuck to the root.
+	NewHeadless(root, 10, 10).Close()
+}
+
+// A Quit that a panic kept Run from reaching the loop for must not end the next Run.
+func TestQuitDoesNotOutliveAPanickingRun(t *testing.T) {
+	if !Supported() {
+		t.Skip("no display")
+	}
+
+	Do(Quit)
+	Do(func() { panic("boom") })
+
+	mustPanic(t, "Run", func() { _ = Run() })
+
+	if quitRequested {
+		t.Error("the Quit is still pending")
+	}
+
+	if err := Run(); err != nil {
+		t.Error(err)
+	}
+}
