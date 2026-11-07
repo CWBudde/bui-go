@@ -3,6 +3,12 @@
 package enginetest
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/CWBudde/bui-go/internal/engine"
@@ -26,6 +32,78 @@ func Golden(t *testing.T, ref, other engine.Kit) {
 			compareRuns(t, c, runCase(t, ref, c), runCase(t, other, c))
 		})
 	}
+}
+
+// PinnedPixels holds every stage of every case to the hash in file.
+func PinnedPixels(t *testing.T, k engine.Kit, file string) {
+	t.Helper()
+
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]string{}
+
+	for line := range strings.Lines(string(data)) {
+		if name, hash, ok := strings.Cut(strings.TrimSpace(line), " "); ok {
+			want[name] = hash
+		}
+	}
+
+	for name, hash := range pixelHashes(t, k, testing.Short()) {
+		if want[name] != hash {
+			t.Errorf("%s: pixels hash to %s, pinned %q", name, hash, want[name])
+		}
+	}
+}
+
+// UpdatePinnedPixels rewrites file for PinnedPixels.
+func UpdatePinnedPixels(t *testing.T, k engine.Kit, file string) {
+	t.Helper()
+
+	hashes := pixelHashes(t, k, false)
+	lines := make([]string, 0, len(hashes))
+
+	for name, hash := range hashes {
+		lines = append(lines, name+" "+hash+"\n")
+	}
+
+	slices.Sort(lines)
+
+	if err := os.WriteFile(file, []byte(strings.Join(lines, "")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// pixelHashes draws every case and hashes each stage, by "case/stage".
+func pixelHashes(t *testing.T, k engine.Kit, skipLong bool) map[string]string {
+	t.Helper()
+	k.SetEmit(ignoreEmit)
+
+	hashes := map[string]string{}
+
+	for _, c := range goldenCases() {
+		if c.long && skipLong {
+			continue
+		}
+
+		for i, pixels := range runCase(t, k, c) {
+			hashes[c.name+"/"+c.stages[i].name] = pixelHash(pixels)
+		}
+	}
+
+	return hashes
+}
+
+func pixelHash(pixels []uint32) string {
+	h := sha256.New()
+
+	if err := binary.Write(h, binary.LittleEndian, pixels); err != nil {
+		panic(err) // a hash never fails to write
+	}
+
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // compareRuns compares two engines' pixels at every stage of a case.

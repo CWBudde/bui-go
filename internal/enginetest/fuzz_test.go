@@ -6,6 +6,7 @@ package enginetest
 
 import (
 	"math"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -14,10 +15,41 @@ import (
 	"github.com/CWBudde/bui-go/internal/engine/wasmengine"
 )
 
+// fpuHazard finds what can make an inf or nan: arithmetic that divides or grows, a function
+// call, a number too large for a double, or the names themselves.
+var fpuHazard = regexp.MustCompile(`[*/^%]|[0-9.][eE][-+0-9]|[a-zA-Z_]\s*\(|inf|nan|[0-9]{300}`)
+
 // mayLoseFPUFlag says an expression can differ for the one documented reason: wasm has no
 // floating-point exception flags, so an intermediate inf or nan that turns finite again
-// succeeds there and fails natively. PLAN.md, "Known limits".
-func mayLoseFPUFlag(native bool, wasm bool) bool { return !native && wasm }
+// succeeds there and fails natively. The README lists it under the wasm engine's limits.
+// The text must be able to do that: if the module accepts 1;2, its parser has a bug. This
+// looks at the text only, so it still forgives a parser bug in text with a hazard in it.
+func mayLoseFPUFlag(expr string, native, wasm bool) bool {
+	return !native && wasm && fpuHazard.MatchString(expr)
+}
+
+func TestMayLoseFPUFlag(t *testing.T) {
+	for _, tc := range []struct {
+		expr         string
+		native, wasm bool
+		want         bool
+	}{
+		{"1/(1/0)", false, true, true},
+		{"1e308*10/1e308", false, true, true},
+		{"exp(1000)-exp(1000)+1", false, true, true},
+		{"1;2", false, true, false},
+		{"a=1", false, true, false},
+		{"1 2", false, true, false},
+		{"0\n%(1%0)", false, true, true},
+		{"\xff", false, true, false},
+		{"1/(1/0)", true, false, false},
+		{"1/(1/0)", false, false, false},
+	} {
+		if got := mayLoseFPUFlag(tc.expr, tc.native, tc.wasm); got != tc.want {
+			t.Errorf("%q, native %v, wasm %v: %v", tc.expr, tc.native, tc.wasm, got)
+		}
+	}
+}
 
 // FuzzEvalNumber compares the expression evaluator on both engines. Its parser takes a
 // user's text directly, so this is the widest input surface the binding has.
@@ -37,7 +69,7 @@ func FuzzEvalNumber(f *testing.F) {
 		b, bok := wasm.EvalNumber(expr)
 
 		if aok != bok {
-			if mayLoseFPUFlag(aok, bok) {
+			if mayLoseFPUFlag(expr, aok, bok) {
 				return
 			}
 
@@ -115,6 +147,13 @@ func FuzzKeyInput(f *testing.F) {
 	kits := []engine.Kit{cgoengine.Kit{}, wasmengine.Kit{}}
 
 	f.Fuzz(func(t *testing.T, text, keysym string) {
+		// Drawing a long text in one field can take seconds, which stalls a fuzzing worker.
+		const longest = 512
+
+		if len(text) > longest || len(keysym) > longest {
+			t.Skip("too long to draw at fuzzing speed")
+		}
+
 		var got [2]string
 
 		for i, k := range kits {

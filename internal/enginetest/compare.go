@@ -22,8 +22,8 @@ const (
 	tolFraction = 1000
 )
 
-// rgbMask keeps the channels of a 0x00RRGGBB pixel. The seam promises zero in the
-// top byte, but the comparison does not depend on it: HighBits reports it instead.
+// rgbMask keeps the channels of a 0x00RRGGBB pixel. The seam promises zero in the top
+// byte, which is no channel to compare: HighBits counts where that promise is broken.
 const rgbMask = 0x00FFFFFF
 
 // pixelDiff summarizes two rasters.
@@ -52,7 +52,7 @@ func (d pixelDiff) String() string {
 
 // within reports whether d meets the tolerance.
 func (d pixelDiff) within() bool {
-	if d.Mismatch {
+	if d.Mismatch || d.HighBits > 0 {
 		return false
 	}
 

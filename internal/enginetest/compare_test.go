@@ -81,14 +81,15 @@ func TestCompareIsSymmetric(t *testing.T) {
 	}
 }
 
-// The top byte is no channel: it counts in HighBits only.
-func TestCompareMasksTopByte(t *testing.T) {
+// The top byte is no channel, but the seam promises it is zero, on either side.
+func TestCompareFailsOnTopByte(t *testing.T) {
 	a := flat(0x00102030)
 	b := flat(0xFF102030)
 
-	d := comparePixels(a, b)
-	if !d.within() || d.Exact != d.Total || d.MaxChannel != 0 || d.HighBits != d.Total {
-		t.Errorf("top byte only: %v", d)
+	for _, d := range []pixelDiff{comparePixels(a, b), comparePixels(b, a)} {
+		if d.within() || d.Exact != d.Total || d.MaxChannel != 0 || d.HighBits != d.Total {
+			t.Errorf("top byte only: %v, within = %v", d, d.within())
+		}
 	}
 }
 
