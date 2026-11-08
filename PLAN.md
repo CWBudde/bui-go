@@ -12,8 +12,9 @@ Open work for bui-go, as of 2026-11-08. Finished work belongs in `docs/design.md
 - [bui-go#9](https://github.com/CWBudde/bui-go/pull/9) is merged, so `main` has the macOS baseline.
 - [bui-go#10](https://github.com/CWBudde/bui-go/pull/10) is merged, so `main` has the Cocoa spike. Christian counted its 1.6x as
   close and lifted the hold on the port, so the port goes ahead before the owner answers.
-- [bui-go#11](https://github.com/CWBudde/bui-go/pull/11) is merged, so `main` has macOS input. Its macOS CI job was red when it
-  merged: six input tests lost their clicks on GitHub's runner. The fix, a CI step and the docs follow it.
+- [bui-go#11](https://github.com/CWBudde/bui-go/pull/11) is merged, so `main` has macOS input.
+- [bui-go#12](https://github.com/CWBudde/bui-go/pull/12) is merged, so `main`'s macOS CI job is green again and runs the Cocoa
+  tests without cgo.
 - A trial bump to BUI `bca7b8d` worked: the wasm built unmodified, reproduced byte for byte, and passed without cgo with the golden
   hashes unchanged. With cgo, only `TestNoDisplay` failed (see Phase 0).
 
@@ -101,10 +102,19 @@ The window draws correctly, and Christian counted 1.6x as close on 2026-11-07, a
       clipboard, a real warp and `pressedMouseButtons` aren't reached.
 - [ ] From the spike: live resize (AppKit's nested loop), scale changes between screens, activation, a real click on the close button,
       and the layer and delegate leaked once per window. (2026-11-07) — partial: the first show activates the app, and `counter`
-      came to the front over the editor and quit cleanly. The rest remains.
-- [ ] A menu with Cmd+Q, Hide and the window items, as `app_init` in the C host builds.
+      came to the front over the editor and quit cleanly. (2026-11-08) — partial: live resize draws, as `windowDidResize:` renders
+      and a wake runs inside AppKit's loops through a run-loop source, and the layer and the delegate are released.
+      `TestLiveResizeDraws` drags a real corner with posted events, and it, `TestWakeRunsInsideATrackingLoop`,
+      `TestWakeDoesNotNestInItsOwnDrain` and `TestWindowFreeReleasesTheWindow` each fail with their part removed. Left: scale changes,
+      which need a relayout that `engine.Kit` lacks, so the interface changes for both engines. Activation and the close button go to
+      the check by hand.
+- [x] A menu with Cmd+Q, Hide and the window items, as `app_init` in the C host builds. (2026-11-08) — the C host's two menus, and an
+      app delegate that closes every window on quit and cancels. `TestQuitClosesEveryWindow` quits by Cmd+Q, `terminate:` and the quit
+      Apple Event in a child, which fails without the delegate, where AppKit exits with status 0. `TestMenu` fails without the Quit
+      item. Cmd+W and Minimize need a key window, which tests can't have.
 - [ ] By hand on the MacBook: click, drag, scroll, type and copy and paste in `examples/counter` and a text field, as no test
-      reaches the real mouse, keyboard or clipboard.
+      reaches the real mouse, keyboard or clipboard. Also Cmd+Q, Cmd+W, Minimize, the Dock's Quit, the close button, dragging an
+      edge while the counter ticks, and whether the first show activates.
 - [x] A test job on `macos-latest` for whatever works without a logged-in session, plus a documented manual run on the MacBook.
       (2026-11-08) — the runner has a logged-in session, so the existing macOS job now also runs `go test -v ./internal/host/cocoa`
       without cgo, with none skipped for want of a display. Input tests wait until the window is on screen, as AppKit dropped
