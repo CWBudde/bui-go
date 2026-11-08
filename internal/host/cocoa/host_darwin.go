@@ -152,7 +152,7 @@ func startWakeSource() {
 }
 
 // performWake does a wake's work and the renders due, wherever the run loop runs. A drain it
-// interrupts, by a loop nested in a callback, leaves the wake to the turn.
+// interrupts, by a loop nested in a callback, leaves the wake to the drain.
 func (h *Host) performWake() {
 	if h.draining {
 		return
@@ -168,6 +168,16 @@ func (h *Host) performWake() {
 
 	if h.wakeWanted.Swap(false) {
 		h.drainWake()
+
+		// A wake that came during the drain, while a loop nested in it ran, found the source
+		// taken by this call, and that loop may have taken its event too. This may also run
+		// inside the host's wait, which nothing else would end, so the wake goes out again.
+		if h.wakeWanted.Load() {
+			cfSourceSignal(wakeSource)
+			cfRunLoopWakeUp(mainLoop)
+			h.wakePosted.Store(true)
+			h.postWake()
+		}
 	}
 
 	h.renderPending(time.Now())
@@ -193,6 +203,11 @@ func (h *Host) Wake() {
 		return
 	}
 
+	h.postWake()
+}
+
+// postWake queues the event that ends a wait in nextEvent.
+func (h *Host) postWake() {
 	runtime.LockOSThread()
 
 	defer runtime.UnlockOSThread()

@@ -195,3 +195,61 @@ func TestWakeDoesNotNestInItsOwnDrain(t *testing.T) {
 		t.Error("the second wake never ran")
 	}
 }
+
+// A wake that comes while a loop nested in a drain runs, and whose event that loop takes, as a
+// modal loop takes every event, still ends the host's wait. The drain here runs from the wake's
+// source, inside that wait.
+func TestWakeTakenByALoopNestedInADrain(t *testing.T) {
+	requireDisplay(t)
+
+	var rescued atomic.Bool
+
+	onMain(func() {
+		f := newFixture()
+		defer f.free()
+
+		id := f.h.WindowNew(f.ctx, "bui cocoa test", 200, 100)
+		defer f.h.WindowFree(id)
+
+		f.h.WindowShow(id)
+
+		drains := 0
+
+		f.h.WakeInit(func() {
+			drains++
+			if drains != 1 {
+				return
+			}
+
+			time.AfterFunc(50*time.Millisecond, f.h.Quit)
+
+			pool := poolPush()
+			defer poolPop(pool)
+
+			for end := time.Now().Add(300 * time.Millisecond); time.Now().Before(end); {
+				ev := f.h.app.Send(selNextEvent, eventMaskAny, clsNSDate.Send(selDateSinceNow, 0.02), nsDefaultRunLoopMode, true)
+				if ev != 0 && !isWake(ev) {
+					f.h.app.Send(selSendEvent, ev)
+				}
+			}
+		})
+
+		timer := time.AfterFunc(5*time.Second, func() {
+			rescued.Store(true)
+			f.h.wakePosted.Store(false)
+			f.h.Quit()
+		})
+		defer timer.Stop()
+
+		// Late enough that the loop waits with nothing due.
+		time.AfterFunc(300*time.Millisecond, f.h.Wake)
+
+		if err := f.h.Run(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	if rescued.Load() {
+		t.Error("the loop kept waiting after a Quit that a nested loop took")
+	}
+}
