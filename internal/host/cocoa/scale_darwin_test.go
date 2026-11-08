@@ -168,3 +168,53 @@ func TestUIScaleFromTheEnvironment(t *testing.T) {
 		}
 	})
 }
+
+// The kit's scale is process-wide, so a window that moves to a screen of another scale
+// mustn't take it from a window that stays: the one that stays still measures and draws at
+// its own.
+func TestEachWindowKeepsItsScale(t *testing.T) {
+	requireDisplay(t)
+	t.Setenv("BUI_UI_SCALE", "")
+
+	onMain(func() {
+		f, b := openNatural(t, 240, 120)
+		defer f.close()
+
+		other := newFixtureOf("Other")
+		defer other.free()
+
+		otherID := f.h.WindowNew(other.ctx, "bui cocoa test", 240, 120)
+		defer f.h.WindowFree(otherID)
+
+		moved := f.h.find(otherID)
+		f.h.WindowShow(otherID)
+		moved.render()
+
+		stays := f.win.px
+		to := otherScale(stays)
+		actual := f.h.backing
+
+		f.h.backing = func(ns objc.ID) float64 {
+			if ns == moved.nswin {
+				return to
+			}
+
+			return actual(ns)
+		}
+
+		pool := poolPush()
+		center := objc.ID(objc.GetClass("NSNotificationCenter")).Send(selDefaultCenter)
+		center.Send(selPostNamed, nsString("NSWindowDidChangeBackingPropertiesNotification"), moved.nswin)
+		poolPop(pool)
+
+		moved.render()
+
+		// A new text measures the button again, at whatever scale the kit has.
+		f.k.SetStr(b, "text", "Press me again")
+		f.win.render()
+
+		if _, _, _, h := f.k.NodeRect(b); !near(float64(h), buttonHeight*math.Max(1, stays)) {
+			t.Errorf("button %d px high in the window that stayed at %v, after the other moved to %v", h, stays, to)
+		}
+	})
+}

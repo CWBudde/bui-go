@@ -86,7 +86,7 @@ type window struct {
 	raster   engine.Raster
 
 	px            float64 // pixels per point
-	scale         float64 // the kit's scale, as SetScale was last given it for this window
+	scale         float64 // the kit's scale for this window, which kit selects
 	w, h          int     // the window's size in pixels, which is the raster's next size
 	rasterW       int
 	rasterH       int
@@ -252,7 +252,17 @@ func (win *window) pxOf(ns objc.ID) float64 {
 // setScale gives the kit this window's scale, which follows its pixels per point.
 func (win *window) setScale() {
 	win.scale = uiScale(win.px)
+	win.kit()
+}
+
+// kit returns the kit with this window's scale selected. The scale is process-wide, as
+// BK_set_scale's is, so windows on screens of different scale would otherwise draw and
+// measure at the scale of whichever window changed last, as they do in the C host. Each call
+// for a window that may draw or measure goes through here.
+func (win *window) kit() engine.Kit {
 	win.host.kit.SetScale(float32(win.scale))
+
+	return win.host.kit
 }
 
 // uiScale is BUI_UI_SCALE, else the backing scale and at least 1, as in the C host.
@@ -291,7 +301,7 @@ func (win *window) backingChanged() {
 		win.setScale()
 
 		if win.scale != old {
-			kit := win.host.kit
+			kit := win.kit()
 			kit.NodeRelayout(kit.ContextRoot(win.ctx))
 		}
 	}
@@ -414,7 +424,7 @@ func (win *window) render() {
 	full := win.full || resized
 	win.full = false
 
-	regions := win.host.kit.RenderDamage(win.ctx, win.raster, win.w, win.h, full)
+	regions := win.kit().RenderDamage(win.ctx, win.raster, win.w, win.h, full)
 	win.rasterW, win.rasterH = win.w, win.h
 
 	if regions > 0 || full {
@@ -623,11 +633,11 @@ func (win *window) Schedule(ms, timer int) {
 func (win *window) runTimers(now time.Time) {
 	if !win.tipDue.IsZero() && !win.tipDue.After(now) {
 		win.tipDue = time.Time{}
-		win.host.kit.Timer(win.ctx, win.tipID)
+		win.kit().Timer(win.ctx, win.tipID)
 	}
 
 	if win.nswin != 0 && !win.customDue.IsZero() && !win.customDue.After(now) {
 		win.customDue = time.Time{}
-		win.host.kit.Timer(win.ctx, timerCustom)
+		win.kit().Timer(win.ctx, timerCustom)
 	}
 }

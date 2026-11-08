@@ -511,6 +511,10 @@ does, and took `BUI_UI_SCALE` as the C and X11 hosts do.
 - **The relayout changes nothing today.** `BK_set_scale` only stores the factor, and sizes measured before it stay cached until
   a relayout. But the raster's size changes with the pixels per point, and the kit measures everything again on any new size. The
   host still calls it, as the C host does, in case the kit stops doing that.
+- **Each window keeps its own scale.** The kit's scale is process-wide, so each window selects its own before it renders, takes
+  input or fires a timer. Otherwise two windows on screens of different scale would draw and measure at whichever changed last, as
+  in the C host. A test moves one of two windows and checks that the other still lays out at its own. Code run by a wake, not
+  being tied to a window, finds the last window's scale, but changing the tree only marks it for the next render.
 - **`engine.Kit` has `ContextRoot` and `NodeRelayout` for it.** Both mirror the C API, and the wasm module exports both. A
   conformance test on both engines keeps the raster's size, so it shows a button that stays at its old size after `SetScale` until
   `NodeRelayout` runs.
