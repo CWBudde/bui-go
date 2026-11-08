@@ -1,4 +1,4 @@
-# a06371a49e7d7ca28a7dd46d80763ea481d11461, load: 4,13 3,93 3,98
+# a06371a49e7d7ca28a7dd46d80763ea481d11461, load: 4.13 3.93 3.98
 goos: darwin
 goarch: arm64
 pkg: github.com/CWBudde/bui-go/internal/enginetest
