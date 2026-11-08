@@ -1200,8 +1200,9 @@ func TestWindowFreedFromItsOwnEvent(t *testing.T) {
 
 		f.mouse(eventMoved, 10, 10, 0, 0)
 
-		if queued != 1 {
-			t.Errorf("%d windows waiting for release inside the event, want 1", queued)
+		// The window and its delegate.
+		if queued != 2 {
+			t.Errorf("%d objects waiting for release inside the event, want 2", queued)
 		}
 
 		// The next turn releases it. A wake keeps that turn from waiting.
@@ -1209,7 +1210,7 @@ func TestWindowFreedFromItsOwnEvent(t *testing.T) {
 		f.h.turn()
 
 		if len(f.h.dead) != 0 {
-			t.Errorf("%d windows still waiting after a turn", len(f.h.dead))
+			t.Errorf("%d objects still waiting after a turn", len(f.h.dead))
 		}
 
 		if !weak.gone(f.h, 2*time.Second) {
