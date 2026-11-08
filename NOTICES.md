@@ -34,6 +34,9 @@ wasi-libc also holds `fts` and `emmalloc`, under their own licences. Neither is 
 
 ## With either engine
 
+BUI itself is GPL-3.0-or-later as a whole, the text in [LICENSE](LICENSE), and its files keep the SPDX header
+`GPL-2.0-or-later`, as its README's "License and credits" states at the pinned commit.
+
 BUI's kit includes these, in `lib/` and in `bui_kit.wasm`. BUI is pinned by the commit in [`BUI_COMMIT`](BUI_COMMIT), and the
 texts come from BUI's tree at that commit.
 

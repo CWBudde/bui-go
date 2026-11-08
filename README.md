@@ -146,11 +146,12 @@ CI runs the same checks and more (`.github/workflows/test.yaml`).
 The licence statements in this section are the project's own reading of the licences involved. They have had no legal review
 and are not legal advice, so check them for your own case before you distribute a program built on bui-go.
 
-This repository is GPL-2.0-or-later, matching the SPDX headers in BUI's source. Its `LICENSE` file is copied from BUI and
-contains the GPLv3 text. We read the GPL as applying to a program that links this package.
+bui-go follows BUI's licensing. As a whole it is GPL-3.0-or-later, and its `LICENSE` file, copied from BUI, holds the GPLv3
+text. Its files carry the SPDX header `GPL-2.0-or-later`, as BUI's files do, both those from Blender and its new ones. We read the
+GPL as applying to a program that links this package.
 
-**We read a binary with the wasm engine as distributable under GPLv3,** not GPLv2: it includes wazero, which is Apache-2.0, and
-as we understand it that licence is compatible with GPLv3 but not with GPLv2. BUI's "or later" is what leaves GPLv3 open.
+**We read a binary with the wasm engine as distributable under GPLv3,** as the whole is: it includes wazero, which is Apache-2.0,
+and as we understand it that licence is compatible with GPLv3 but not with GPLv2.
 [`NOTICES.md`](NOTICES.md) lists the third-party parts and their licences, and [`licenses/`](licenses) holds the texts.
 
 We offer the following as the corresponding source of the committed binaries:
