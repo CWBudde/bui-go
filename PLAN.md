@@ -17,6 +17,8 @@ Open work for bui-go, as of 2026-11-08. Finished work belongs in `docs/design.md
   tests without cgo.
 - [bui-go#13](https://github.com/CWBudde/bui-go/pull/13) is merged, so `main`'s Cocoa host has a menu, quits with Cmd+Q and draws
   during live resize.
+- [bui-go#14](https://github.com/CWBudde/bui-go/pull/14) is merged, so `main`'s Cocoa host follows scale changes between screens.
+- BUI tagged `v0.5.0` on 2026-11-08, 112 commits past `v0.4.1` (see Phase 0).
 - A trial bump to BUI `bca7b8d` worked: the wasm built unmodified, reproduced byte for byte, and passed without cgo with the golden
   hashes unchanged. With cgo, only `TestNoDisplay` failed (see Phase 0).
 
@@ -34,12 +36,18 @@ None of this depends on the owner's answer.
 - [ ] Decide how to handle cgo and Go hosts disagreeing on a Wayland-only system: cgo opens a native Wayland window, while the Go
       host needs X11 or XWayland. Decide between documenting this and forcing `BUI_WINDOW_BACKEND=x11` in the cgo engine.
       Not reachable at `v0.4.1`, which predates BUI's Wayland host, so this is due at the first bump past that tag.
-- [ ] Rewrite "Licensing" in `docs/design.md`, the README and `NOTICES.md`. BUI now states GPL-3.0-or-later, with
-      `GPL-2.0-or-later` SPDX headers kept on files. The reading still has no legal review.
+- [x] Rewrite "Licensing" in `docs/design.md`, the README and `NOTICES.md`. BUI now states GPL-3.0-or-later, with
+      `GPL-2.0-or-later` SPDX headers kept on files. The reading still has no legal review. (2026-11-08) — bui-go mirrors BUI, as
+      Christian chose: GPL-3.0-or-later as a whole, with its files' `GPL-2.0-or-later` headers unchanged. The README, "Licensing" and
+      `NOTICES.md` say so, and the wasm engine's GPLv3 now follows from the whole rather than from "or later".
 - [ ] Hover and drag with a real pointer on a real X session. So far these have only been driven on Xvfb.
 - [ ] Decide on wasm containment: a trap or out-of-memory ends the process. Recommendation: keep that behaviour, and file an issue
       for an opt-in fatal hook.
-- [ ] Make the load in `scripts/bench.sh` independent of the locale: on the German MacBook `sysctl` gives `7,05`. Set `LC_ALL=C`.
+- [x] Make the load in `scripts/bench.sh` independent of the locale: on the German MacBook `sysctl` gives `7,05`. Set `LC_ALL=C`.
+      (2026-11-08) — `LC_ALL=C` on the `sysctl` call alone. On the MacBook under `de_DE.UTF-8`, the old `load()` printed
+      `1,47 2,14 2,30` and the new one `1.47 2.14 2.30`. The header of `bench/2026-11-07-a06371a.txt` now uses dots too.
+- [ ] Bump BUI to `v0.5.0`, tagged 2026-11-08: rebuild the wasm module and the libraries, and check the golden hashes. It makes the
+      Wayland decision above due.
 
 ## Phase 1: macOS baseline on the MacBook
 

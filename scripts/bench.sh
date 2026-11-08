@@ -14,12 +14,13 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 count="${1:-5}"
 out="$root/bench/$(date +%F)-$(git -C "$root" rev-parse --short HEAD).txt"
 
-# macOS has no /proc: its sysctl prints "{ 1.23 2.34 3.45 }".
+# macOS has no /proc: its sysctl prints "{ 1.23 2.34 3.45 }", or "{ 1,23 ... }" in a German
+# locale, hence LC_ALL=C.
 load() {
 	if [[ -r /proc/loadavg ]]; then
 		cut -d' ' -f1-3 /proc/loadavg
 	else
-		sysctl -n vm.loadavg | tr -d '{}' | xargs
+		LC_ALL=C sysctl -n vm.loadavg | tr -d '{}' | xargs
 	fi
 }
 

@@ -565,5 +565,5 @@ Every combination runs even after one fails, and the command exits non-zero if a
 ## Licensing
 
 The README states how the licences are read, and [`NOTICES.md`](../NOTICES.md) lists the parts. That reading has had no legal review.
-It starts from two facts: wazero is Apache-2.0, and BUI is GPL-2.0-or-later with the GPLv3 text in its
-`LICENSE`.
+It starts from two facts: wazero is Apache-2.0, and BUI as a whole is GPL-3.0-or-later, the text in its `LICENSE`, while its
+files keep the SPDX header `GPL-2.0-or-later` (BUI's README, "License and credits"). bui-go states its own licence the same way.
