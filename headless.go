@@ -23,14 +23,7 @@ type context struct {
 // nearest root, so a context around another one never hears that a node inside
 // the inner one went away, and keeps pointing at it.
 func newContext(root *Node) *context {
-	c := root.live()
-	if root.owner != nil {
-		panic("bui: node is already the root of a Window or Headless")
-	}
-
-	if liveRootAbove(c) != nil || liveRootIn(c) != nil {
-		panic("bui: a Window or Headless already holds an ancestor or a descendant of this node")
-	}
+	c := checkRoot(root)
 
 	handle := kit.ContextNew(c)
 	if handle == 0 {
@@ -42,6 +35,21 @@ func newContext(root *Node) *context {
 	root.owner = ctx
 
 	return ctx
+}
+
+// checkRoot panics unless root can take a context: it is live, not a root yet,
+// and no live context holds an ancestor or a descendant of it.
+func checkRoot(root *Node) engine.Node {
+	c := root.live()
+	if root.owner != nil {
+		panic("bui: node is already the root of a Window or Headless")
+	}
+
+	if liveRootAbove(c) != nil || liveRootIn(c) != nil {
+		panic("bui: a Window or Headless already holds an ancestor or a descendant of this node")
+	}
+
+	return c
 }
 
 // free destroys the context but not the root.

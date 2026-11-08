@@ -451,6 +451,7 @@ func TestNestedContextsAreRefused(t *testing.T) {
 	h = NewHeadless(outer, 100, 100)
 
 	mustPanic(t, "context inside a live one", func() { NewHeadless(inner, 100, 100) })
+	mustPanic(t, "window inside a live context", func() { _, _ = NewWindow(inner, "nested", 100, 100) })
 
 	other, leaf := NewNode("frame"), NewNode("frame")
 	other.Add(leaf)
