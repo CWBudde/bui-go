@@ -7,9 +7,10 @@ Unless a section says otherwise, the facts here were established against BUI `e3
 (clang 23.1.0, wasi-libc `2e6fb9d8ee0c`) and Go 1.26.8, on an Intel i7-1255U (12 threads) running Linux 6.8. That laptop was
 in active use, so absolute times move with its load, and only ratios from one run compare well.
 
-BUI is now pinned at `v0.4.1` (`09a154c`). Since `e3aba90` its kit gained `BK_version` and its version macros, and resetting a widget
-now always goes back to its default, which is the first value it was given unless one is set. The measurements here were not
-repeated at the new pin.
+BUI is now pinned at `v0.5.0` (`37e6fb4`). Since `e3aba90` its kit gained `BK_version` and its version macros, and resetting a widget
+now always goes back to its default, which is the first value it was given unless one is set. `v0.5.0` added input methods
+(`BK_ime_*`), which the binding does not call yet, and a native Wayland host (see "Wayland"). The golden hashes did not change at
+either pin. The measurements here were not repeated at the new pin.
 
 ## Why WebAssembly
 
@@ -353,6 +354,22 @@ window and makes `Run` return `ErrDisplayLost`. On the native engine Xlib's defa
 - **The package's tests start their own Xvfb.** On a shared display, windows of a test binary running in parallel cover theirs and
   show in the pixels they read back, and clipboards collide. With a server of their own they can also change the layout and send
   real input. Without Xvfb they use `DISPLAY` and skip what would change it.
+
+## Wayland
+
+From `v0.5.0` BUI's libraries also hold a native Wayland host, which the kit picks whenever `WAYLAND_DISPLAY` is set and a
+compositor answers. The Go hosts speak only X11, which a Wayland desktop provides through XWayland. Left alone, the engines would
+disagree: on a Wayland-only system the native engine would open a window where the wasm engine reports `ErrNoDisplay`, and on a
+desktop with both they would open different kinds of window.
+
+- **The native engine defaults the kit to X11.** At start-up it sets `BUI_WINDOW_BACKEND=x11` with C's `setenv` and no
+  overwrite, so a value the user or the program set wins, and an `os.Setenv` before the first window still changes it. Go's copy
+  of the environment, which child processes get, stays as it was. `TestWindowBackendDefault` pins both.
+- **Checked on a Wayland session.** On the laptop's GNOME session with `DISPLAY` unset, `Supported` reported false by default, as
+  the Go host does, and true with `BUI_WINDOW_BACKEND=wayland`.
+- **The libraries always hold the Wayland host.** BUI builds it only when the Wayland headers, `wayland-scanner` and
+  wayland-protocols are installed, and otherwise prints a status line. `scripts/build-kit.sh` asks for it (`BUI_WAYLAND=ON`) and
+  fails without it, as it does for X11, so `lib/` does not depend on what a machine happens to have.
 
 ## Testing notes
 

@@ -50,6 +50,31 @@ var (
 	windowHosts = map[engine.Context]engine.WindowHost{}
 )
 
+// windowBackendVar names the variable the kit reads to choose between X11 and Wayland windows.
+const windowBackendVar = "BUI_WINDOW_BACKEND"
+
+// The kit opens a native Wayland window whenever WAYLAND_DISPLAY is set, while the Go window
+// hosts need X11, which a Wayland desktop provides through XWayland. Defaulting the kit to X11
+// makes both engines open the same kind of window. A value the user or the program set wins:
+// C's setenv runs with overwrite 0, and a later os.Setenv still replaces it. Go's copy of the
+// environment, which child processes get, stays as it was.
+func init() {
+	name, value := C.CString(windowBackendVar), C.CString("x11")
+	defer C.free(unsafe.Pointer(name))
+	defer C.free(unsafe.Pointer(value))
+	C.setenv(name, value, 0)
+}
+
+// windowBackend returns the kit's view of windowBackendVar, which can differ from os.Getenv's.
+func windowBackend() string {
+	name := C.CString(windowBackendVar)
+	defer C.free(unsafe.Pointer(name))
+	if v := C.getenv(name); v != nil {
+		return C.GoString(v)
+	}
+	return ""
+}
+
 // ptr turns an opaque reference back into its C pointer. It points into C memory,
 // which the Go runtime neither moves nor frees.
 func ptr[R ~uintptr](r R) unsafe.Pointer {

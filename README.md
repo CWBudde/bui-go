@@ -70,13 +70,18 @@ The same API runs on two engines, chosen when you build:
 
 | Build                                 | Engine                                                                              | Windows                                     | Needs               |
 | ------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------- | ------------------- |
-| Linux amd64 with cgo                  | Native: static libraries in `lib/`                                                  | X11                                         | C and C++ toolchain |
+| Linux amd64 with cgo                  | Native: static libraries in `lib/`                                                  | X11, and Wayland on request                 | C and C++ toolchain |
 | Anything else, or the tag `bui_nocgo` | WebAssembly: an embedded module, in [wazero](https://github.com/tetratelabs/wazero) | X11 on Linux and Cocoa on macOS, in pure Go | Nothing but Go      |
 
 `go build -tags bui_nocgo` selects the wasm engine on a machine that would otherwise use cgo. Both engines draw the same
 pixels: the tests compare them exactly. On Windows the wasm engine runs headless, and `NewWindow` and `Run` report `ErrNoDisplay`.
 On macOS they open a window with mouse, scroll, keys, cursors, the clipboard, a menu, live resize and scale changes between
 screens.
+
+**Wayland.** The Go window hosts need X11, which a Wayland desktop provides through XWayland. BUI's libraries can also open
+native Wayland windows, so the native engine sets `BUI_WINDOW_BACKEND=x11` for them when the variable is unset, and both engines
+open the same kind of window. Set `BUI_WINDOW_BACKEND=wayland` to get native Wayland windows from the native engine. The wasm
+engine ignores the variable.
 
 **Speed.** On amd64 and arm64 wazero compiles the module, which renders at about 2-4x native time and handles a hover at
 about 1.2-3x. A full 1920x1080 frame takes about 13 ms when the machine is not loaded. Other architectures use wazero's
@@ -157,7 +162,9 @@ and as we understand it that licence is compatible with GPLv3 but not with GPLv2
 We offer the following as the corresponding source of the committed binaries:
 
 - `lib/linux_amd64/`, static libraries including the FreeType, stb_truetype, NanoSVG, libjpeg-turbo, libwebp and Wuffs code
-  vendored in BUI's tree: BUI at the commit in [`BUI_COMMIT`](BUI_COMMIT), built by `scripts/build-kit.sh`.
+  vendored in BUI's tree: BUI at the commit in [`BUI_COMMIT`](BUI_COMMIT), built by `scripts/build-kit.sh`. They also hold code
+  that `wayland-scanner` generated from wayland-protocols 1.49, whose two protocol files are in the wayland-protocols release of
+  that version.
 - `internal/engine/wasmengine/bui_kit.wasm`, and the test's `sjlj_probe.wasm`: the same BUI commit, `wasm/` in this
   repository, and wasi-sdk 34.0, whose version and checksum are in `scripts/build-wasm.sh`, which builds them. `NOTICES.md`
   names the wasi-libc and LLVM commits that wasi-sdk release pins.
