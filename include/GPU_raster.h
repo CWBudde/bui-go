@@ -312,6 +312,12 @@ typedef struct BuiGpuX11Window {
 } BuiGpuX11Window;
 int BUI_raster_gpu_attach(BuiRaster *r, void *window_handle, int wait);
 int BUI_raster_gpu_poll(BuiRaster *r);
+/* 1 while attach() still creates the device. A host polls until it is 0, so an idle window
+ * also switches over. */
+int BUI_raster_gpu_pending(const BuiRaster *r);
+/* Frees the GPU device and waits for a device that is still starting. Call it before the window
+ * is destroyed. The raster draws on the CPU again from its next frame. */
+void BUI_raster_gpu_release(BuiRaster *r);
 int BUI_raster_is_gpu(const BuiRaster *r);
 /* Whether new windows use the GPU: BUI_gpu_set_default(), overridden by the
  * BUI_GPU environment variable (1/0). Off by default. */
