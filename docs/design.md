@@ -377,7 +377,8 @@ session, so the Cocoa tests open real windows there and take the events they mak
 
 - **Windows is built, not run.**
 - **Windows has no window host.** It would be a port of `kit_window_win32.c` (987 lines).
-- **The macOS window host is half done,** described under "The Cocoa spike" and "Input on macOS". It is a port of
+- **The macOS window host is mostly done,** described under "The Cocoa spike", "Input on macOS" and "Menu, quit and live
+  resize". It lacks scale changes between screens and IME. It is a port of
   `kit_window_cocoa.m` (1921 lines), started before BUI's owner answered on [BUI#8](https://github.com/ppmpreetham/BUI/issues/8).
   Its input has only been driven by events the tests made, on the MacBook and on GitHub's runner, not by a hand on a real mouse
   and keyboard.
@@ -443,7 +444,7 @@ with `CGO_ENABLED=0`. It opens a window and presents the raster, and it has no i
 
 **Not tried:** a click on the real close button (`TestCloseEndsRun` closes it from code), dragging a window's edge, whose nested
 AppKit loop the host doesn't handle yet, moving between screens of different scale, and activation. The layer and the delegate are
-each leaked once per window.
+each leaked once per window. "Menu, quit and live resize" below handles the drag and the leaks.
 
 ### Input on macOS
 
@@ -473,7 +474,29 @@ events, cursors, `Warp` and the clipboard. Command maps to Ctrl, as Blender's ma
     with the new modifier.
 - **As in the C and X11 hosts:** a window freed inside one of its own events is released between loop turns, and a panic in a
   handler ends the process.
-- **Still missing:** a menu and Cmd+Q, live resize, scale changes between screens, IME, and the leaks above.
+- **Still missing:** scale changes between screens and IME. "Menu, quit and live resize" covers the rest.
+
+### Menu, quit and live resize
+
+On 2026-11-08 the host got the rest of what `app_init` and the window delegate do in the C host, apart from scale changes.
+
+- **The menu bar** has the C host's application menu (Hide, Hide Others, Show All, Quit) and Window menu (Minimize, Zoom, Full
+  Screen, Close), unless NSApp has a menu already. AppKit adds Close All and a second Full Screen item to the Window menu itself.
+- **Quitting ends `Run`, not the process.** NSApp's delegate answers `applicationShouldTerminate:` by closing every window and
+  cancelling, so Cmd+Q, the Dock's Quit and the quit Apple Event that logging out sends all end the loop. AppKit's own answer
+  would `exit()` from inside it. The tests quit in a child process that must print a line after `Run` returns: without the delegate,
+  `terminate:` ends the child with exit status 0.
+- **Dragging an edge keeps drawing.** AppKit runs its own loop until the button goes up. `windowDidResize:` renders each new size
+  during it, as in the C host. A wake also signals a run-loop source in the common modes, so `Do`, and the renders it asks for,
+  run inside that loop and in others that take only their own events. The wake's posted event still ends the host's own wait.
+  A wake doesn't run inside a loop nested in its own work; the next turn runs it.
+- **A test drags a real corner.** Events posted to the application's own queue start AppKit's resize, and with ten drags of 5 points
+  the window grew from 200 x 132 to 250 x 182 points. That moves no real pointer.
+- **The layer and the delegate are released** with their window. Tests watch both go away.
+- **What tests can't reach:** Cmd+W and Minimize act on the key window, which a test app under the prohibited activation policy
+  never has. The menu's items are checked, but not what they do.
+- **Scale changes are still missing.** Following a move between screens needs a relayout after `SetScale`, which `engine.Kit`
+  doesn't offer.
 
 ### Running the macOS tests by hand
 
@@ -495,7 +518,8 @@ Every combination runs even after one fails, and the command exits non-zero if a
   input would need Screen Recording and Accessibility, granted by hand in System Settings to a fixed binary run as an agent, as
   "On a MacBook" describes.
 - **What only a hand checks:** a real click, drag, scroll and typing, the real clipboard, a warp, and activation, as
-  `examples/counter` shows them.
+  `examples/counter` shows them, as well as Cmd+W, Minimize, the Dock's Quit, the close button and dragging an edge with the real
+  pointer.
 
 ## Known limits
 

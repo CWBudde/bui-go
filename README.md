@@ -14,10 +14,11 @@ binary:
 CGO_ENABLED=0 go run ./examples/counter
 ```
 
-On Windows that example exits with `ErrNoDisplay`, as it has no window host yet. On macOS it opens a window that takes the mouse,
-scroll and keys, but that host is unfinished: it has no menu, and dragging the window's edge holds up the loop. Drive the tree with `Headless` instead, which renders into memory and takes synthetic input. It
-works on Linux too, also with no display. In a module that
-requires `github.com/CWBudde/bui-go`, this prints `clicked`:
+On Windows that example exits with `ErrNoDisplay`, as it has no window host yet. On macOS it opens a window with a menu, which
+takes the mouse, scroll and keys, quits with Cmd+Q and keeps drawing while you drag its edge. That host doesn't follow a move to
+a screen of another scale yet. To render without a window, drive the tree with `Headless`, which renders into memory and takes
+synthetic input. It works on Linux too, also with no display. In a module that requires `github.com/CWBudde/bui-go`, this prints
+`clicked`:
 
 ```go
 package main
@@ -74,7 +75,8 @@ The same API runs on two engines, chosen when you build:
 
 `go build -tags bui_nocgo` selects the wasm engine on a machine that would otherwise use cgo. Both engines draw the same
 pixels: the tests compare them exactly. On Windows the wasm engine runs headless, and `NewWindow` and `Run` report `ErrNoDisplay`.
-On macOS they open a window with mouse, scroll, keys, cursors and the clipboard, but no menu or live resize yet.
+On macOS they open a window with mouse, scroll, keys, cursors, the clipboard, a menu and live resize, but no scale changes
+between screens yet.
 
 **Speed.** On amd64 and arm64 wazero compiles the module, which renders at about 2-4x native time and handles a hover at
 about 1.2-3x. A full 1920x1080 frame takes about 13 ms when the machine is not loaded. Other architectures use wazero's
