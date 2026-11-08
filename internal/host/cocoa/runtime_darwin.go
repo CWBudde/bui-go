@@ -35,6 +35,11 @@ var (
 	cgWarp           func(nsPoint) int32
 	cgAssociateMouse func(bool) int32
 	pthreadMainNP    func() int32
+	cfRunLoopGetMain func() uintptr
+	cfSourceCreate   func(alloc uintptr, order int, ctx *cfSourceContext) uintptr
+	cfAddSource      func(loop, source, mode uintptr)
+	cfSourceSignal   func(source uintptr)
+	cfRunLoopWakeUp  func(loop uintptr)
 	poolPush         func() uintptr
 	poolPop          func(uintptr)
 )
@@ -93,6 +98,7 @@ var (
 	clsNSMenu, clsNSMenuItem objc.ID
 	nsDefaultRunLoopMode objc.ID
 	srgbSpace            uintptr
+	cfCommonModes        uintptr
 	delegateClass        objc.Class
 )
 
@@ -161,6 +167,11 @@ func bindFunctions() bool {
 		"CGWarpMouseCursorPosition":              &cgWarp,
 		"CGAssociateMouseAndMouseCursorPosition": &cgAssociateMouse,
 		"pthread_main_np":                        &pthreadMainNP,
+		"CFRunLoopGetMain":                       &cfRunLoopGetMain,
+		"CFRunLoopSourceCreate":                  &cfSourceCreate,
+		"CFRunLoopAddSource":                     &cfAddSource,
+		"CFRunLoopSourceSignal":                  &cfSourceSignal,
+		"CFRunLoopWakeUp":                        &cfRunLoopWakeUp,
 		"objc_autoreleasePoolPush":               &poolPush,
 		"objc_autoreleasePoolPop":                &poolPop,
 	} {
@@ -171,6 +182,14 @@ func bindFunctions() bool {
 
 		purego.RegisterFunc(fn, p)
 	}
+
+	// CFRunLoopAddSource tells the common modes by the constant's address, not its content.
+	p, err := purego.Dlsym(purego.RTLD_DEFAULT, "kCFRunLoopCommonModes")
+	if err != nil {
+		return false
+	}
+
+	cfCommonModes = **(**uintptr)(unsafe.Pointer(&p))
 
 	return true
 }

@@ -4,7 +4,7 @@
 // Objective-C runtime, a port of BUI's kit_window_cocoa.m. The kit renders into a raster in
 // software, so a host only forwards input and presents pixels.
 //
-// The port isn't finished: it has no menu, live resize or scale changes between screens yet.
+// The port isn't finished: it doesn't follow scale changes between screens yet.
 //
 // All of it runs on the main OS thread, which AppKit requires, except Wake. Package bui
 // keeps the main goroutine there.
@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/CWBudde/bui-go/internal/engine"
+	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
 )
 
@@ -47,6 +48,7 @@ type Host struct {
 	wakeWanted atomic.Bool
 	wakePosted atomic.Bool
 	wakeFunc   func()
+	draining   bool
 	quit       bool
 
 	frameDue time.Time
@@ -116,7 +118,59 @@ func (h *Host) start() {
 	h.app.Send(selSetActivationPolicy, policy)
 	h.setUpApp()
 	h.app.Send(selFinishLaunching)
+	startWakeSource()
 	h.ready.Store(true)
+}
+
+// cfSourceContext is CFRunLoopSourceContext, version 0: the version, info, seven callbacks
+// the source doesn't need, and perform.
+type cfSourceContext [10]uintptr
+
+const contextPerform = 9
+
+// The wake's run-loop source, one for the process like NSApp, and the main run loop.
+var wakeSource, mainLoop uintptr
+
+// startWakeSource adds a source to the main run loop in its common modes, as the C host's
+// wake does, so that a wake runs inside the loops AppKit runs for a drag or a menu, which take
+// only their own events: the wake's event would wait until they end.
+func startWakeSource() {
+	if wakeSource != 0 {
+		return
+	}
+
+	ctx := &cfSourceContext{}
+	ctx[contextPerform] = purego.NewCallback(func(uintptr) {
+		if current != nil {
+			current.performWake()
+		}
+	})
+
+	mainLoop = cfRunLoopGetMain()
+	wakeSource = cfSourceCreate(0, 0, ctx)
+	cfAddSource(mainLoop, wakeSource, cfCommonModes)
+}
+
+// performWake does a wake's work and the renders due, wherever the run loop runs. A drain it
+// interrupts, by a loop nested in a callback, leaves the wake to the turn.
+func (h *Host) performWake() {
+	if h.draining {
+		return
+	}
+
+	pool := poolPush()
+	defer poolPop(pool)
+
+	// AppKit may be inside an event, and what a wake frees waits for the turn either way.
+	h.depth++
+
+	defer func() { h.depth-- }()
+
+	if h.wakeWanted.Swap(false) {
+		h.drainWake()
+	}
+
+	h.renderPending(time.Now())
 }
 
 // WakeInit implements engine.Host.
@@ -129,8 +183,12 @@ func (h *Host) Wake() {
 		return
 	}
 
-	h.wakeWanted.Store(true)
+	if !h.wakeWanted.Swap(true) {
+		cfSourceSignal(wakeSource)
+		cfRunLoopWakeUp(mainLoop)
+	}
 
+	// The event ends the host's own wait, where the source alone would leave it to its date.
 	if h.wakePosted.Swap(true) {
 		return
 	}
@@ -289,6 +347,10 @@ func (h *Host) renderPending(now time.Time) {
 
 // drainWake is guarded like a callback from the kit, as the X11 host's is.
 func (h *Host) drainWake() {
+	h.draining = true
+
+	defer func() { h.draining = false }()
+
 	returned := false
 
 	defer engine.ExitIfUnwinding(&returned)

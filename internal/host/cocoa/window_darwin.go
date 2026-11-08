@@ -67,6 +67,7 @@ var (
 	selDeclareTypes        = objc.RegisterName("declareTypes:owner:")
 	selSetString           = objc.RegisterName("setString:forType:")
 	selArrayWithObject     = objc.RegisterName("arrayWithObject:")
+	selInLiveResize        = objc.RegisterName("inLiveResize")
 )
 
 // window is one NSWindow on a kit context. It implements engine.WindowHost.
@@ -122,10 +123,16 @@ func registerDelegate() bool {
 			}
 		})
 	}
+	// Dragging an edge runs AppKit's own loop, which doesn't return to the host's until the
+	// button goes up, so the window draws its new size here, as in the C host.
 	onResize := func(_ objc.ID, _ objc.SEL, note objc.ID) {
 		guarded(func() {
 			if win := current.findNS(note.Send(selObject)); win != nil {
 				win.syncSize()
+
+				if win.renderPending && objc.Send[bool](win.view, selInLiveResize) {
+					win.render()
+				}
 			}
 		})
 	}
