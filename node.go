@@ -92,13 +92,18 @@ func (n *Node) Str(key string) string {
 }
 
 // Add appends child to n, moving it from any parent it has. It panics if child is
-// n or an ancestor of n, as the kit would loop forever over the resulting cycle.
+// n or an ancestor of n, as the kit would loop forever over the resulting cycle,
+// and if the move would put the root of a live Window or Headless inside another.
 func (n *Node) Add(child *Node) {
 	parent, c := n.live(), child.live()
 	for p := parent; p != 0; p = kit.NodeParent(p) {
 		if p == c {
 			panic(fmt.Sprintf("bui: Add of a %q node to itself or a descendant", child.typ))
 		}
+	}
+
+	if liveRootAbove(parent) != nil && liveRootIn(c) != nil {
+		panic(fmt.Sprintf("bui: Add of a %q node would put a live Window or Headless inside another one", child.typ))
 	}
 
 	if !kit.NodeAdd(parent, c) {
@@ -216,6 +221,20 @@ func liveRootIn(c engine.Node) *Node {
 	for i := range kit.NodeChildCount(c) {
 		if root := liveRootIn(kit.NodeChild(c, i)); root != nil {
 			return root
+		}
+	}
+
+	return nil
+}
+
+// liveRootAbove finds the nearest node from c up, c included, that a context not
+// yet being closed uses as its root.
+func liveRootAbove(c engine.Node) *Node {
+	for p := c; p != 0; p = kit.NodeParent(p) {
+		if id := kit.NodeID(p); id != 0 {
+			if n := nodes[id]; n.owner != nil && !n.owner.closing {
+				return n
+			}
 		}
 	}
 

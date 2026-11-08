@@ -433,6 +433,55 @@ func TestRootOrderIsEnforced(t *testing.T) {
 	root.Close()
 }
 
+// The kit finds a node's context by walking up to the nearest root, so a context
+// around another one misses the inner one's nodes: freeing such a node would leave
+// the outer context's hover and focus pointing at it. The binding refuses to nest
+// contexts, by NewHeadless and by Add.
+func TestNestedContextsAreRefused(t *testing.T) {
+	base := liveHandleCount()
+	outer, middle, inner := NewNode("frame"), NewNode("frame"), NewNode("frame")
+	outer.Add(middle)
+	middle.Add(inner)
+
+	h := NewHeadless(inner, 100, 100)
+
+	mustPanic(t, "context around a live one", func() { NewHeadless(outer, 100, 100) })
+	h.Close()
+
+	h = NewHeadless(outer, 100, 100)
+
+	mustPanic(t, "context inside a live one", func() { NewHeadless(inner, 100, 100) })
+
+	other, leaf := NewNode("frame"), NewNode("frame")
+	other.Add(leaf)
+	ho := NewHeadless(leaf, 10, 10)
+
+	mustPanic(t, "Add of a live root's ancestor into a live context", func() { middle.Add(other) })
+	mustPanic(t, "Add of a live root into a live context", func() { middle.Add(leaf) })
+
+	// Neither refusal changed the trees.
+	if p := kit.NodeParent(other.live()); p != 0 {
+		t.Errorf("other has a parent after the refused Add")
+	}
+
+	if p := kit.NodeParent(leaf.live()); p != other.live() {
+		t.Errorf("leaf moved out of other after the refused Add")
+	}
+
+	// A live root may still go under a node no context holds.
+	free := NewNode("frame")
+	free.Add(other)
+
+	ho.Close()
+	h.Close()
+	free.Close()
+	outer.Close()
+
+	if got := liveHandleCount() - base; got != 0 {
+		t.Fatalf("live handles = baseline+%d, want baseline", got)
+	}
+}
+
 func TestUnknownNodeTypePanics(t *testing.T) {
 	mustPanic(t, "NewNode", func() { NewNode("no_such_type") })
 }
