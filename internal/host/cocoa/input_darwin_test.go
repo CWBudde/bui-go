@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,6 +35,7 @@ const (
 	keyLeft        = 0x7B
 	keyKeypad5     = 0x57
 	keyQ           = 0x0C
+	keyW           = 0x0D
 	scrollUnitPx   = 0
 	scrollUnitLn   = 1
 	fieldPhase     = 99
@@ -1236,8 +1238,15 @@ func TestFatalPathsExit(t *testing.T) {
 }
 
 func TestChildProcess(t *testing.T) {
-	if os.Getenv(childEnv) == "" {
+	mode := os.Getenv(childEnv)
+	if mode == "" {
 		t.Skip("only runs as a subprocess")
+	}
+
+	if strings.HasPrefix(mode, "quit-") {
+		quitChild(t, mode)
+
+		return
 	}
 
 	onMain(func() {

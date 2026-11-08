@@ -114,6 +114,7 @@ func (h *Host) start() {
 	}
 
 	h.app.Send(selSetActivationPolicy, policy)
+	h.setUpApp()
 	h.app.Send(selFinishLaunching)
 	h.ready.Store(true)
 }

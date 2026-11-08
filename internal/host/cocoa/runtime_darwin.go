@@ -89,7 +89,8 @@ var (
 var (
 	clsNSApplication, clsNSEvent, clsNSDate, clsNSString, clsNSWindow,
 	clsNSScreen, clsCALayer, clsCATransaction,
-	clsNSCursor, clsNSPasteboard, clsNSArray, clsNSProcessInfo, clsNSTrackingArea objc.ID
+	clsNSCursor, clsNSPasteboard, clsNSArray, clsNSProcessInfo, clsNSTrackingArea,
+	clsNSMenu, clsNSMenuItem objc.ID
 	nsDefaultRunLoopMode objc.ID
 	srgbSpace            uintptr
 	delegateClass        objc.Class
@@ -120,6 +121,7 @@ func loadNow() bool {
 	clsNSCursor, clsNSPasteboard = cls("NSCursor"), cls("NSPasteboard")
 	clsNSArray, clsNSProcessInfo = cls("NSArray"), cls("NSProcessInfo")
 	clsNSTrackingArea = cls("NSTrackingArea")
+	clsNSMenu, clsNSMenuItem = cls("NSMenu"), cls("NSMenuItem")
 
 	pool := poolPush()
 	defer poolPop(pool)
@@ -129,7 +131,7 @@ func loadNow() bool {
 	nsDefaultRunLoopMode = nsString("kCFRunLoopDefaultMode").Send(selRetain)
 	srgbSpace = cgColorSpaceCreateNamed(uintptr(nsString("kCGColorSpaceSRGB")))
 
-	return srgbSpace != 0 && registerDelegate() && registerView()
+	return srgbSpace != 0 && registerDelegate() && registerView() && registerAppDelegate()
 }
 
 // bindFunctions opens the frameworks and binds the C functions.
