@@ -3,6 +3,8 @@
 package cocoa
 
 import (
+	"os"
+	"strconv"
 	"time"
 	"unsafe"
 
@@ -84,6 +86,7 @@ type window struct {
 	raster   engine.Raster
 
 	px            float64 // pixels per point
+	scale         float64 // the kit's scale for this window, which kit selects
 	w, h          int     // the window's size in pixels, which is the raster's next size
 	rasterW       int
 	rasterH       int
@@ -123,16 +126,18 @@ func registerDelegate() bool {
 			}
 		})
 	}
-	// Dragging an edge runs AppKit's own loop, which doesn't return to the host's until the
-	// button goes up, so the window draws its new size here, as in the C host.
 	onResize := func(_ objc.ID, _ objc.SEL, note objc.ID) {
 		guarded(func() {
 			if win := current.findNS(note.Send(selObject)); win != nil {
-				win.syncSize()
+				win.resized()
+			}
+		})
+	}
 
-				if win.renderPending && objc.Send[bool](win.view, selInLiveResize) {
-					win.render()
-				}
+	onBacking := func(_ objc.ID, _ objc.SEL, note objc.ID) {
+		guarded(func() {
+			if win := current.findNS(note.Send(selObject)); win != nil {
+				win.backingChanged()
 			}
 		})
 	}
@@ -149,6 +154,7 @@ func registerDelegate() bool {
 	cls, err := objc.RegisterClass("BUIGoWindowDelegate", objc.GetClass("NSObject"), nil, nil, []objc.MethodDef{
 		{Cmd: objc.RegisterName("windowWillClose:"), Fn: onClose},
 		{Cmd: objc.RegisterName("windowDidResize:"), Fn: onResize},
+		{Cmd: objc.RegisterName("windowDidChangeBackingProperties:"), Fn: onBacking},
 		{Cmd: objc.RegisterName("windowDidBecomeKey:"), Fn: onBecomeKey},
 	})
 	if err != nil {
@@ -160,8 +166,9 @@ func registerDelegate() bool {
 	return true
 }
 
-// WindowNew implements engine.Host. A logical size w x h takes w x h points, so the kit
-// sees w*px x h*px pixels and draws its widgets px times larger, as in the C host.
+// WindowNew implements engine.Host. As in the C host, a logical size w x h takes
+// w*scale/px x h*scale/px points, so the kit sees w*scale x h*scale pixels and draws its
+// widgets scale times larger. Without BUI_UI_SCALE, scale is px, so w x h takes w x h points.
 func (h *Host) WindowNew(ctx engine.Context, title string, width, height int) engine.Window {
 	if !h.Supported() {
 		return 0
@@ -179,10 +186,16 @@ func (h *Host) WindowNew(ctx engine.Context, title string, width, height int) en
 		px = 1
 	}
 
-	h.kit.SetScale(float32(px))
-
 	win := &window{host: h, ctx: ctx, px: px}
-	win.create(title, max(width, 1), max(height, 1))
+	win.setScale()
+
+	k := win.scale / px
+	win.create(title, max(float64(width)*k, 1), max(float64(height)*k, 1))
+
+	// It opened on another screen than the main one.
+	if win.px != px {
+		win.setScale()
+	}
 
 	win.raster = h.kit.RasterNew(1, 1)
 	win.rasterW, win.rasterH = 1, 1
@@ -197,8 +210,9 @@ func (h *Host) WindowNew(ctx engine.Context, title string, width, height int) en
 	return win.id
 }
 
-func (win *window) create(title string, width, height int) {
-	rect := nsRect{Size: nsSize{float64(width), float64(height)}}
+// create makes the NSWindow, with a content view of width x height points.
+func (win *window) create(title string, width, height float64) {
+	rect := nsRect{Size: nsSize{width, height}}
 
 	ns := clsNSWindow.Send(selAlloc).Send(selInitWindow, rect,
 		uint64(styleTitled|styleClosable|styleMiniaturize|styleResizable), uint64(backingBuffered), false)
@@ -228,11 +242,83 @@ func (win *window) create(title string, width, height int) {
 }
 
 func (win *window) pxOf(ns objc.ID) float64 {
-	if px := objc.Send[float64](ns, selBackingScale); px > 0 {
+	if px := win.host.backing(ns); px > 0 {
 		win.px = px
 	}
 
 	return win.px
+}
+
+// setScale gives the kit this window's scale, which follows its pixels per point.
+func (win *window) setScale() {
+	win.scale = uiScale(win.px)
+	win.kit()
+}
+
+// kit returns the kit with this window's scale selected. The scale is process-wide, as
+// BK_set_scale's is, so windows on screens of different scale would otherwise draw and
+// measure at the scale of whichever window changed last, as they do in the C host. Each call
+// for a window that may draw or measure goes through here.
+func (win *window) kit() engine.Kit {
+	win.host.kit.SetScale(float32(win.scale))
+
+	return win.host.kit
+}
+
+// uiScale is BUI_UI_SCALE, else the backing scale and at least 1, as in the C host.
+func uiScale(px float64) float64 {
+	if env := envScale(); env > 0 {
+		return env
+	}
+
+	return max(1, px)
+}
+
+// envScale is BUI_UI_SCALE, 0 if it isn't set or doesn't parse to more than 0. The C host
+// takes atof's reading, which accepts a number followed by anything.
+func envScale() float64 {
+	v, err := strconv.ParseFloat(os.Getenv("BUI_UI_SCALE"), 64)
+	if err != nil || v <= 0 {
+		return 0
+	}
+
+	return v
+}
+
+// backingChanged follows a move to a screen of another backing scale, as the C host's
+// on_backing_changed does: the layer takes the new pixels per point, and unless
+// BUI_UI_SCALE fixes it, the kit takes the new scale and measures everything again.
+//
+// The relayout is the C host's. The raster's size changes with the pixels per point, and
+// the kit measures everything again on any new size, so today it changes nothing a test
+// can see. It keeps the layout right should the kit stop doing that.
+func (win *window) backingChanged() {
+	if px := win.host.backing(win.nswin); px > 0 && px != win.px {
+		win.px = px
+		win.layer.Send(selSetContentsScale, px)
+
+		old := win.scale
+		win.setScale()
+
+		if win.scale != old {
+			kit := win.kit()
+			kit.NodeRelayout(kit.ContextRoot(win.ctx))
+		}
+	}
+
+	win.full, win.renderPending = true, true
+	win.resized()
+}
+
+// resized reads the new size. Dragging an edge runs AppKit's own loop, which doesn't return
+// to the host's until the button goes up, so the window draws its new size here, as in the C
+// host.
+func (win *window) resized() {
+	win.syncSize()
+
+	if win.renderPending && objc.Send[bool](win.view, selInLiveResize) {
+		win.render()
+	}
 }
 
 // syncSize reads the content view's size, in points, as the next raster's size in pixels.
@@ -338,7 +424,7 @@ func (win *window) render() {
 	full := win.full || resized
 	win.full = false
 
-	regions := win.host.kit.RenderDamage(win.ctx, win.raster, win.w, win.h, full)
+	regions := win.kit().RenderDamage(win.ctx, win.raster, win.w, win.h, full)
 	win.rasterW, win.rasterH = win.w, win.h
 
 	if regions > 0 || full {
@@ -547,11 +633,11 @@ func (win *window) Schedule(ms, timer int) {
 func (win *window) runTimers(now time.Time) {
 	if !win.tipDue.IsZero() && !win.tipDue.After(now) {
 		win.tipDue = time.Time{}
-		win.host.kit.Timer(win.ctx, win.tipID)
+		win.kit().Timer(win.ctx, win.tipID)
 	}
 
 	if win.nswin != 0 && !win.customDue.IsZero() && !win.customDue.After(now) {
 		win.customDue = time.Time{}
-		win.host.kit.Timer(win.ctx, timerCustom)
+		win.kit().Timer(win.ctx, timerCustom)
 	}
 }

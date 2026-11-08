@@ -4,8 +4,6 @@
 // Objective-C runtime, a port of BUI's kit_window_cocoa.m. The kit renders into a raster in
 // software, so a host only forwards input and presents pixels.
 //
-// The port isn't finished: it doesn't follow scale changes between screens yet.
-//
 // All of it runs on the main OS thread, which AppKit requires, except Wake. Package bui
 // keeps the main goroutine there.
 package cocoa
@@ -68,6 +66,10 @@ type Host struct {
 	buttons    func() uint64
 	pasteboard func() objc.ID
 	noActivate bool
+
+	// backing reads a window's pixels per point, which a test fakes to move it to a screen
+	// of another scale.
+	backing func(ns objc.ID) float64
 }
 
 var _ engine.Host = (*Host)(nil)
@@ -78,6 +80,7 @@ func New(kit engine.Kit) *Host {
 		kit:        kit,
 		buttons:    func() uint64 { return objc.Send[uint64](clsNSEvent, selPressedButtons) },
 		pasteboard: func() objc.ID { return clsNSPasteboard.Send(selGeneralPasteboard) },
+		backing:    func(ns objc.ID) float64 { return objc.Send[float64](ns, selBackingScale) },
 	}
 }
 

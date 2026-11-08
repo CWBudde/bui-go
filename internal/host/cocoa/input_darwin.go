@@ -142,7 +142,7 @@ func (win *window) eventPixels(ev objc.ID) (x, y int) {
 func (win *window) mouseDown(ev objc.ID) {
 	x, y := win.eventPixels(ev)
 	win.nswin.Send(selMakeFirstResp, win.view)
-	win.host.kit.PressMods(win.ctx, x, y, win.host.modsOf(objc.Send[uint64](ev, selModifierFlags))|engine.ModButton1)
+	win.kit().PressMods(win.ctx, x, y, win.host.modsOf(objc.Send[uint64](ev, selModifierFlags))|engine.ModButton1)
 }
 
 // releaseMods are the modifiers of a release: the kit documents the button as gone.
@@ -152,17 +152,17 @@ func (win *window) releaseMods(ev objc.ID) int {
 
 func (win *window) mouseUp(ev objc.ID) {
 	x, y := win.eventPixels(ev)
-	win.host.kit.ReleaseMods(win.ctx, x, y, win.releaseMods(ev))
+	win.kit().ReleaseMods(win.ctx, x, y, win.releaseMods(ev))
 }
 
 func (win *window) rightDown(ev objc.ID) {
 	x, y := win.eventPixels(ev)
-	win.host.kit.ContextMenu(win.ctx, x, y, win.host.modsOf(objc.Send[uint64](ev, selModifierFlags)))
+	win.kit().ContextMenu(win.ctx, x, y, win.host.modsOf(objc.Send[uint64](ev, selModifierFlags)))
 }
 
 func (win *window) rightUp(ev objc.ID) {
 	x, y := win.eventPixels(ev)
-	win.host.kit.Button(win.ctx, x, y, buttonRight, true, win.releaseMods(ev))
+	win.kit().Button(win.ctx, x, y, buttonRight, true, win.releaseMods(ev))
 }
 
 func (win *window) otherDown(ev objc.ID) {
@@ -171,7 +171,7 @@ func (win *window) otherDown(ev objc.ID) {
 	}
 
 	x, y := win.eventPixels(ev)
-	win.host.kit.Button(win.ctx, x, y, buttonMiddle, false, win.host.modsOf(objc.Send[uint64](ev, selModifierFlags)))
+	win.kit().Button(win.ctx, x, y, buttonMiddle, false, win.host.modsOf(objc.Send[uint64](ev, selModifierFlags)))
 }
 
 func (win *window) otherUp(ev objc.ID) {
@@ -180,7 +180,7 @@ func (win *window) otherUp(ev objc.ID) {
 	}
 
 	x, y := win.eventPixels(ev)
-	win.host.kit.Button(win.ctx, x, y, buttonMiddle, true, win.releaseMods(ev))
+	win.kit().Button(win.ctx, x, y, buttonMiddle, true, win.releaseMods(ev))
 }
 
 // motion skips moves stamped just after a warp: they still carry the old position, and a
@@ -191,7 +191,7 @@ func (win *window) motion(ev objc.ID) {
 	}
 
 	x, y := win.eventPixels(ev)
-	win.host.kit.Motion(win.ctx, x, y, win.host.modsOf(objc.Send[uint64](ev, selModifierFlags)))
+	win.kit().Motion(win.ctx, x, y, win.host.modsOf(objc.Send[uint64](ev, selModifierFlags)))
 }
 
 // mouseExited leaves a drag alone, as a drag keeps the pointer.
@@ -202,7 +202,7 @@ func (win *window) mouseExited(objc.ID) {
 
 	win.host.showCursor(true)
 	clsNSCursor.Send(selArrowCursor).Send(selSet)
-	win.host.kit.Motion(win.ctx, offWindow, offWindow, 0)
+	win.kit().Motion(win.ctx, offWindow, offWindow, 0)
 }
 
 // takeNotches splits whole notches off a scroll sum, at most maxNotches of them. It
@@ -293,7 +293,7 @@ func (win *window) wheel(x, y, dir, n, mods int) {
 			return
 		}
 
-		win.host.kit.Wheel(win.ctx, x, y, dir, mods)
+		win.kit().Wheel(win.ctx, x, y, dir, mods)
 	}
 }
 

@@ -189,12 +189,12 @@ func (win *window) handleKey(ev objc.ID, press bool) {
 	keysym := keysymOf(ev, code)
 
 	if !press {
-		h.kit.KeyRelease(win.ctx, keysym, mods)
+		win.kit().KeyRelease(win.ctx, keysym, mods)
 
 		return
 	}
 
-	h.kit.Key(win.ctx, typedText(ev, code, flags), keysym, mods)
+	win.kit().Key(win.ctx, typedText(ev, code, flags), keysym, mods)
 }
 
 // handleFlags sends modifier presses and releases as keys.
@@ -212,9 +212,9 @@ func (win *window) handleFlags(flags uint64) {
 		}
 
 		if flags&key.bit != 0 {
-			h.kit.Key(win.ctx, "", key.keysym, mods)
+			win.kit().Key(win.ctx, "", key.keysym, mods)
 		} else {
-			h.kit.KeyRelease(win.ctx, key.keysym, mods)
+			win.kit().KeyRelease(win.ctx, key.keysym, mods)
 		}
 	}
 }

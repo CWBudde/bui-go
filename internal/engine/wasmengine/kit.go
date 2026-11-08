@@ -284,6 +284,9 @@ func (k Kit) NodeRect(n engine.Node) (x, y, w, h int) {
 	return m.readI32(r), m.readI32(r + 4), m.readI32(r + 8), m.readI32(r + 12)
 }
 
+// NodeRelayout implements engine.Kit.
+func (k Kit) NodeRelayout(n engine.Node) { k.get().call("BK_node_relayout", ptr(n)) }
+
 // SetNum implements engine.Kit.
 func (k Kit) SetNum(n engine.Node, key string, v float64) bool {
 	m := k.get()
@@ -357,6 +360,11 @@ func (k Kit) GeomSet(n engine.Node, key string, v float64) {
 // ContextNew implements engine.Kit.
 func (k Kit) ContextNew(root engine.Node) engine.Context {
 	return engine.Context(api.DecodeU32(k.get().call("BK_context_new", ptr(root))))
+}
+
+// ContextRoot implements engine.Kit.
+func (k Kit) ContextRoot(ctx engine.Context) engine.Node {
+	return engine.Node(api.DecodeU32(k.get().call("BK_context_root", ptr(ctx))))
 }
 
 // ContextSetEmitHost implements engine.Kit.

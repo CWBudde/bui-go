@@ -91,6 +91,9 @@ type Kit interface {
 	NodeChild(n Node, i int) Node
 	// NodeRect returns the node's rectangle in raster pixels.
 	NodeRect(n Node) (x, y, w, h int)
+	// NodeRelayout measures n and the nodes in its context again and lays them out on
+	// the next render. Sizes measured before a SetScale stay until it runs.
+	NodeRelayout(n Node)
 
 	// SetNum and SetStr return false for a key the kit does not know.
 	SetNum(n Node, key string, v float64) bool
@@ -107,6 +110,8 @@ type Kit interface {
 	GeomSet(n Node, key string, v float64)
 
 	ContextNew(root Node) Context
+	// ContextRoot returns the root the context was made with.
+	ContextRoot(ctx Context) Node
 	// ContextSetEmitHost installs the host that forwards events to SetEmit's
 	// receiver. It must run before Host.WindowNew, which saves the host it finds.
 	ContextSetEmitHost(ctx Context)

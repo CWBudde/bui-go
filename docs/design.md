@@ -377,8 +377,8 @@ session, so the Cocoa tests open real windows there and take the events they mak
 
 - **Windows is built, not run.**
 - **Windows has no window host.** It would be a port of `kit_window_win32.c` (987 lines).
-- **The macOS window host is mostly done,** described under "The Cocoa spike", "Input on macOS" and "Menu, quit and live
-  resize". It lacks scale changes between screens and IME. It is a port of
+- **The macOS window host is mostly done,** described under "The Cocoa spike", "Input on macOS", "Menu, quit and live
+  resize" and "Scale changes". It lacks IME. It is a port of
   `kit_window_cocoa.m` (1921 lines), started before BUI's owner answered on [BUI#8](https://github.com/ppmpreetham/BUI/issues/8).
   Its input has only been driven by events the tests made, on the MacBook and on GitHub's runner, not by a hand on a real mouse
   and keyboard.
@@ -444,7 +444,7 @@ with `CGO_ENABLED=0`. It opens a window and presents the raster, and it has no i
 
 **Not tried:** a click on the real close button (`TestCloseEndsRun` closes it from code), dragging a window's edge, whose nested
 AppKit loop the host doesn't handle yet, moving between screens of different scale, and activation. The layer and the delegate are
-each leaked once per window. "Menu, quit and live resize" below handles the drag and the leaks.
+each leaked once per window. "Menu, quit and live resize" below handles the drag and the leaks, and "Scale changes" the screens.
 
 ### Input on macOS
 
@@ -474,11 +474,12 @@ events, cursors, `Warp` and the clipboard. Command maps to Ctrl, as Blender's ma
     with the new modifier.
 - **As in the C and X11 hosts:** a window freed inside one of its own events is released between loop turns, and a panic in a
   handler ends the process.
-- **Still missing:** scale changes between screens and IME. "Menu, quit and live resize" covers the rest.
+- **Still missing:** IME. "Menu, quit and live resize" and "Scale changes" cover the rest.
 
 ### Menu, quit and live resize
 
-On 2026-11-08 the host got the rest of what `app_init` and the window delegate do in the C host, apart from scale changes.
+On 2026-11-08 the host got the rest of what `app_init` and the window delegate do in the C host, apart from scale changes, which
+"Scale changes" covers.
 
 - **The menu bar** has the C host's application menu (Hide, Hide Others, Show All, Quit) and Window menu (Minimize, Zoom, Full
   Screen, Close), unless NSApp has a menu already. AppKit adds Close All and a second Full Screen item to the Window menu itself.
@@ -495,8 +496,32 @@ On 2026-11-08 the host got the rest of what `app_init` and the window delegate d
 - **The layer and the delegate are released** with their window. Tests watch both go away.
 - **What tests can't reach:** Cmd+W and Minimize act on the key window, which a test app under the prohibited activation policy
   never has. The menu's items are checked, but not what they do.
-- **Scale changes are still missing.** Following a move between screens needs a relayout after `SetScale`, which `engine.Kit`
-  doesn't offer.
+
+### Scale changes
+
+Also on 2026-11-08, the host began to follow a window to a screen of another backing scale, as the C host's `on_backing_changed`
+does, and took `BUI_UI_SCALE` as the C and X11 hosts do.
+
+- **A move between screens** reaches the delegate as `windowDidChangeBackingProperties:`. The layer takes the new pixels per
+  point. Unless `BUI_UI_SCALE` fixes the scale, the kit takes the new one and `NodeRelayout` runs on the root. Then the window
+  renders in full at its new size in pixels, and clicks map through the new pixels per point.
+- **`BUI_UI_SCALE`** sets the kit's scale, as in the C host: a window of w x h takes w*scale/px x h*scale/px points, so the kit
+  sees w*scale x h*scale pixels. Without it, the scale is the backing scale and at least 1, so w x h takes w x h points as before.
+  A window that opens on another screen than the main one takes that screen's scale.
+- **The relayout changes nothing today.** `BK_set_scale` only stores the factor, and sizes measured before it stay cached until
+  a relayout. But the raster's size changes with the pixels per point, and the kit measures everything again on any new size. The
+  host still calls it, as the C host does, in case the kit stops doing that.
+- **Each window keeps its own scale.** The kit's scale is process-wide, so each window selects its own before it renders, takes
+  input or fires a timer. Otherwise two windows on screens of different scale would draw and measure at whichever changed last, as
+  in the C host. A test moves one of two windows and checks that the other still lays out at its own. Code run by a wake, not
+  being tied to a window, finds the last window's scale, but changing the tree only marks it for the next render.
+- **`engine.Kit` has `ContextRoot` and `NodeRelayout` for it.** Both mirror the C API, and the wasm module exports both. A
+  conformance test on both engines keeps the raster's size, so it shows a button that stays at its old size after `SetScale` until
+  `NodeRelayout` runs.
+- **The tests fake the screen.** The MacBook has one scale, so the tests replace the backing scale the host reads and post
+  `NSWindowDidChangeBackingPropertiesNotification` within the process. Removing the handler or the layer's update fails them, and
+  so does ignoring `BUI_UI_SCALE`. A real move between screens, and a window that opens on another screen, are left to a hand
+  with a second screen.
 
 ### Running the macOS tests by hand
 

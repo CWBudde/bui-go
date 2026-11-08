@@ -15,6 +15,8 @@ Open work for bui-go, as of 2026-11-08. Finished work belongs in `docs/design.md
 - [bui-go#11](https://github.com/CWBudde/bui-go/pull/11) is merged, so `main` has macOS input.
 - [bui-go#12](https://github.com/CWBudde/bui-go/pull/12) is merged, so `main`'s macOS CI job is green again and runs the Cocoa
   tests without cgo.
+- [bui-go#13](https://github.com/CWBudde/bui-go/pull/13) is merged, so `main`'s Cocoa host has a menu, quits with Cmd+Q and draws
+  during live resize.
 - A trial bump to BUI `bca7b8d` worked: the wasm built unmodified, reproduced byte for byte, and passed without cgo with the golden
   hashes unchanged. With cgo, only `TestNoDisplay` failed (see Phase 0).
 
@@ -100,21 +102,27 @@ The window draws correctly, and Christian counted 1.6x as close on 2026-11-07, a
       (2026-11-07) — ported from the C view, with cursors and `Warp`. 363 passes and no failures on the MacBook, with and without cgo,
       on Go 1.27.1 and 1.26.8, and each of 47 handler breaks fails its test. The input is synthetic: keys skip `NSApp`, and the real
       clipboard, a real warp and `pressedMouseButtons` aren't reached.
-- [ ] From the spike: live resize (AppKit's nested loop), scale changes between screens, activation, a real click on the close button,
+- [x] From the spike: live resize (AppKit's nested loop), scale changes between screens, activation, a real click on the close button,
       and the layer and delegate leaked once per window. (2026-11-07) — partial: the first show activates the app, and `counter`
       came to the front over the editor and quit cleanly. (2026-11-08) — partial: live resize draws, as `windowDidResize:` renders
       and a wake runs inside AppKit's loops through a run-loop source, and the layer and the delegate are released.
       `TestLiveResizeDraws` drags a real corner with posted events, and it, `TestWakeRunsInsideATrackingLoop`,
       `TestWakeDoesNotNestInItsOwnDrain` and `TestWindowFreeReleasesTheWindow` each fail with their part removed. Left: scale changes,
       which need a relayout that `engine.Kit` lacks, so the interface changes for both engines. Activation and the close button go to
-      the check by hand.
+      the check by hand. (2026-11-08) — scale changes follow, as `windowDidChangeBackingProperties:` gives the layer the new pixels per
+      point and the kit the new scale, then calls the new `NodeRelayout` on `ContextRoot`, as the C host does. `BUI_UI_SCALE` works
+      as in the C host. `TestScaleChangeBetweenScreens` and `TestUIScaleFromTheEnvironment` fake the backing scale and fail without
+      the handler, the layer's update or the environment rule. The relayout itself is shown only by the conformance case
+      `ScaleNeedsRelayout` on both engines: a new raster size already relayouts. Activation, the close button and a real second
+      screen are in the check by hand below.
 - [x] A menu with Cmd+Q, Hide and the window items, as `app_init` in the C host builds. (2026-11-08) — the C host's two menus, and an
       app delegate that closes every window on quit and cancels. `TestQuitClosesEveryWindow` quits by Cmd+Q, `terminate:` and the quit
       Apple Event in a child, which fails without the delegate, where AppKit exits with status 0. `TestMenu` fails without the Quit
       item. Cmd+W and Minimize need a key window, which tests can't have.
 - [ ] By hand on the MacBook: click, drag, scroll, type and copy and paste in `examples/counter` and a text field, as no test
       reaches the real mouse, keyboard or clipboard. Also Cmd+Q, Cmd+W, Minimize, the Dock's Quit, the close button, dragging an
-      edge while the counter ticks, and whether the first show activates.
+      edge while the counter ticks, and whether the first show activates. With a second screen of another scale, moving the window
+      there and opening it there.
 - [x] A test job on `macos-latest` for whatever works without a logged-in session, plus a documented manual run on the MacBook.
       (2026-11-08) — the runner has a logged-in session, so the existing macOS job now also runs `go test -v ./internal/host/cocoa`
       without cgo, with none skipped for want of a display. Input tests wait until the window is on screen, as AppKit dropped
