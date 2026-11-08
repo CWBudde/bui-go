@@ -370,15 +370,17 @@ window and makes `Run` return `ErrDisplayLost`. On the native engine Xlib's defa
 
 ## What has been run
 
-As of 2026-11-07, at `77f19ed`, CI passes these on GitHub: the native engine, the wasm engine with and without cgo, tests with cgo on
-on macOS and Linux arm64 (which select the wasm engine), a cross-build without cgo for Linux, Windows and macOS on amd64 and arm64,
-and the module's byte-identical rebuild.
+As of 2026-11-08, CI passes these on GitHub: the native engine, the wasm engine with and without cgo, tests with cgo on
+on macOS and Linux arm64 (which select the wasm engine), the Cocoa host's tests without cgo on macOS, a cross-build without cgo
+for Linux, Windows and macOS on amd64 and arm64, and the module's byte-identical rebuild. GitHub's macOS runner has a logged-in
+session, so the Cocoa tests open real windows there and take the events they make; none of them skips for want of a display.
 
 - **Windows is built, not run.**
 - **Windows has no window host.** It would be a port of `kit_window_win32.c` (987 lines).
 - **The macOS window host is half done,** described under "The Cocoa spike" and "Input on macOS". It is a port of
   `kit_window_cocoa.m` (1921 lines), started before BUI's owner answered on [BUI#8](https://github.com/ppmpreetham/BUI/issues/8).
-  Its input has only been driven by events the tests made, not by a hand on a real mouse and keyboard.
+  Its input has only been driven by events the tests made, on the MacBook and on GitHub's runner, not by a hand on a real mouse
+  and keyboard.
 - **A real pointer on a real desktop has not been tried.** Drawing, the `Do` ticker, resizing and the close button were checked on a
   real X session and window manager, through `xdotool windowsize` and `wmctrl -c`. Hovering and dragging were driven on Xvfb only.
 
@@ -456,6 +458,11 @@ events, cursors, `Warp` and the clipboard. Command maps to Ctrl, as Blender's ma
   once it waits for events, and took focus from the user's editor for seconds during a run. A middle button and scrolling go to the
   view directly, as `NSEvent` can't make them for a window.
 - **Each test fails when its handler is broken.** All 47 handler breaks tried failed their test, run on the MacBook.
+- **Input tests wait for the window to come on screen.** AppKit drops mouse events that reach a window before the window server
+  reports it visible (`occlusionState`), as no hand could click it yet. On the MacBook that gap is too short to hit, but on GitHub's
+  runner six input tests lost their clicks when they ran right after a test that left no window behind. A probe there found the
+  window visible to AppKit, hit-testing to the view and the posted events dequeued and dispatched, with no click arriving; the same
+  events sent half a second later arrived. `openInput` now pumps until the window is visible, for at most 5 s.
 - **What tests don't reach:** the real clipboard (they use a private pasteboard), a real warp, which would move the user's pointer,
   `pressedMouseButtons`, and activation, which the tests turn off. A hand on the MacBook is the check left for those.
 - **Two changes from the C host:**
@@ -467,6 +474,26 @@ events, cursors, `Warp` and the clipboard. Command maps to Ctrl, as Blender's ma
 - **As in the C and X11 hosts:** a window freed inside one of its own events is released between loop turns, and a panic in a
   handler ends the process.
 - **Still missing:** a menu and Cmd+Q, live resize, scale changes between screens, IME, and the leaks above.
+
+### Running the macOS tests by hand
+
+CI covers what the Cocoa host's tests reach. The MacBook adds Go 1.26, the oldest `go.mod` allows, alongside the newest, cgo on and off,
+and the race detector. Its clone is `~/Code/bui-go`, reached with `ssh macbook-ts`, and Go is only on the path of a login shell:
+
+```sh
+ssh macbook-ts 'zsh -lc "cd ~/Code/bui-go && git pull --ff-only && \
+  for tc in local go1.26.8; do for cgo in 1 0; do \
+    GOTOOLCHAIN=\$tc CGO_ENABLED=\$cgo go test -count=1 ./... || echo FAIL \$tc \$cgo; done; done && \
+  go test -race -count=3 ./internal/host/cocoa"'
+```
+
+- **Nothing may take the user's focus.** Tests run under the prohibited activation policy, and each input test fails if the app
+  became active. The frontmost app should be the same before and after.
+- **No grant is needed.** Tests make their own events, use a private pasteboard and don't warp the pointer. Screenshots and real
+  input would need Screen Recording and Accessibility, granted by hand in System Settings to a fixed binary run as an agent, as
+  "On a MacBook" describes.
+- **What only a hand checks:** a real click, drag, scroll and typing, the real clipboard, a warp, and activation, as
+  `examples/counter` shows them.
 
 ## Known limits
 
