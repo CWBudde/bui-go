@@ -48,7 +48,7 @@ func main() {
 }
 ```
 
-CI runs the tests on macOS, including the Cocoa host's with real windows, but only cross-builds for Windows, so that platform is
+CI runs the tests on macOS, including the Cocoa host's tests, which open real windows, but only cross-builds for Windows, so that platform is
 untested.
 
 In a window program, the same calls look like this:

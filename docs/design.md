@@ -481,11 +481,13 @@ CI covers what the Cocoa host's tests reach. The MacBook adds Go 1.26, the oldes
 and the race detector. Its clone is `~/Code/bui-go`, reached with `ssh macbook-ts`, and Go is only on the path of a login shell:
 
 ```sh
-ssh macbook-ts 'zsh -lc "cd ~/Code/bui-go && git pull --ff-only && \
+ssh macbook-ts 'zsh -lc "cd ~/Code/bui-go && git pull --ff-only || exit 1; rc=0; \
   for tc in local go1.26.8; do for cgo in 1 0; do \
-    GOTOOLCHAIN=\$tc CGO_ENABLED=\$cgo go test -count=1 ./... || echo FAIL \$tc \$cgo; done; done && \
-  go test -race -count=3 ./internal/host/cocoa"'
+    GOTOOLCHAIN=\$tc CGO_ENABLED=\$cgo go test -count=1 ./... || { echo FAIL \$tc \$cgo; rc=1; }; done; done; \
+  go test -race -count=3 ./internal/host/cocoa || rc=1; exit \$rc"'
 ```
+
+Every combination runs even after one fails, and the command exits non-zero if any did.
 
 - **Nothing may take the user's focus.** Tests run under the prohibited activation policy, and each input test fails if the app
   became active. The frontmost app should be the same before and after.
