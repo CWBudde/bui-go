@@ -112,6 +112,9 @@ func (Kit) NodeRect(n engine.Node) (x, y, w, h int) {
 	return int(r[0]), int(r[1]), int(r[2]), int(r[3])
 }
 
+// NodeRelayout implements engine.Kit.
+func (Kit) NodeRelayout(n engine.Node) { C.BK_node_relayout(node(n)) }
+
 // SetNum implements engine.Kit.
 func (Kit) SetNum(n engine.Node, key string, v float64) bool {
 	ck, free := cstr(key)
@@ -169,6 +172,11 @@ func (Kit) GeomSet(n engine.Node, key string, v float64) {
 // ContextNew implements engine.Kit.
 func (Kit) ContextNew(root engine.Node) engine.Context {
 	return engine.Context(unsafe.Pointer(C.BK_context_new(node(root))))
+}
+
+// ContextRoot implements engine.Kit.
+func (Kit) ContextRoot(ctx engine.Context) engine.Node {
+	return nodeRef(C.BK_context_root(context(ctx)))
 }
 
 // ContextSetEmitHost implements engine.Kit.

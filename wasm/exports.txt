@@ -13,6 +13,7 @@ BK_node_parent
 BK_node_child
 BK_node_child_count
 BK_node_rect
+BK_node_relayout
 BK_set_num
 BK_set_str
 BK_set_strs
@@ -25,6 +26,7 @@ BK_eval_number
 # contexts, rendering and input
 BK_context_new
 BK_context_free
+BK_context_root
 BK_render
 BK_press
 BK_release

@@ -25,6 +25,7 @@ func testInput(h *harness) {
 	h.sub("RawInputReturns", testInputRaw)
 	h.sub("ContextMenu", testInputContextMenu)
 	h.sub("Scale", testInputScale)
+	h.sub("ScaleNeedsRelayout", testInputScaleRelayout)
 	h.sub("ImagePollIdle", testInputImagePoll)
 }
 
@@ -280,6 +281,47 @@ func testInputScale(h *harness) {
 
 	if !slices.Equal(before, s.render()) {
 		h.t.Error("SetScale(1) did not restore the pixels")
+	}
+}
+
+// A button at its natural size keeps the size it was measured at after SetScale, until
+// NodeRelayout on the context's root measures it again, as a host does when its window
+// moves to a screen with another scale.
+func testInputScaleRelayout(h *harness) {
+	root, b := h.node(typeFrame), h.node(typeButton)
+	h.str(b, keyText, "Press me")
+	h.packIn(root, b, pack{})
+
+	s := h.scene(root, 400, 200)
+	defer s.close()
+
+	defer h.k.SetScale(1)
+
+	h.k.SetScale(1)
+	s.render()
+
+	small := h.rectOf(b)
+	if small.w <= 0 || small.h <= 0 {
+		h.t.Fatalf("button not laid out: %+v", small)
+	}
+
+	h.k.SetScale(2)
+	s.render()
+
+	if got := h.rectOf(b); got != small {
+		h.t.Logf("SetScale(2) alone relaid out the button: %+v, was %+v", got, small)
+	}
+
+	if got := h.k.ContextRoot(s.ctx); got != root {
+		h.t.Errorf("ContextRoot = %v, want the root %v", got, root)
+	}
+
+	h.k.NodeRelayout(h.k.ContextRoot(s.ctx))
+	s.render()
+
+	// Text doesn't measure exactly twice as wide at twice the size.
+	if big := h.rectOf(b); big.w < small.w*3/2 || big.h < 2*small.h-2 {
+		h.t.Errorf("after NodeRelayout at scale 2 the button is %+v, was %+v at 1", big, small)
 	}
 }
 
