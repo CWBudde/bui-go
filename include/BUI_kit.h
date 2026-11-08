@@ -38,9 +38,9 @@
  * library at run time; compare it with BUI_KIT_VERSION from this header when
  * the two can differ (a shared build, a binding). */
 #define BUI_KIT_VERSION_MAJOR 0
-#define BUI_KIT_VERSION_MINOR 4
-#define BUI_KIT_VERSION_PATCH 1
-#define BUI_KIT_VERSION_STRING "0.4.1"
+#define BUI_KIT_VERSION_MINOR 5
+#define BUI_KIT_VERSION_PATCH 0
+#define BUI_KIT_VERSION_STRING "0.5.0"
 /* One number to compare: 0.4.0 is 400, 1.2.3 is 10203. */
 #define BUI_KIT_VERSION \
   (BUI_KIT_VERSION_MAJOR * 10000 + BUI_KIT_VERSION_MINOR * 100 + BUI_KIT_VERSION_PATCH)
@@ -589,6 +589,34 @@ int BK_wheel(BKContext *ctx, int x, int y, int delta, int mods);
 int BK_scroll(BKContext *ctx, int x, int y, float dx, float dy, int mods);
 int BK_key(BKContext *ctx, const char *text, const char *keysym, int mods);
 int BK_context_menu(BKContext *ctx, int x, int y, int mods);
+
+/* -- Input methods (IME) ------------------------------------------------------
+ * Blender's model (GHOST_ImeWin32, wmIMEData, the text button's IME handling), one API for every
+ * window host and binding. The IME is off until a text field or text area is being edited and
+ * on only while it is, so shortcuts keep working with a CJK keyboard.
+ *
+ * Host side: forward the platform's composition events to BK_ime_event, then after each render
+ * ask BK_ime_state whether the IME must be (re)started or moved, and tell the platform.
+ * The kit draws the composition (underlined, at the caret) and inserts the result. */
+typedef struct BKImeEvent {
+  const char *result;     /* text the IME committed (UTF-8), "" = none */
+  const char *composite;  /* text still being composed, "" = none */
+  int cursor_pos;         /* the IME's caret as a byte offset in composite, -1 = none */
+  int sel_start, sel_end; /* the clause being converted, bytes in composite, -1 = none */
+} BKImeEvent;
+enum { BK_IME_COMPOSITION_START = 0, BK_IME_COMPOSITION, BK_IME_COMPOSITION_END };
+int BK_ime_event(BKContext *ctx, int type, const BKImeEvent *e);
+
+typedef struct BKImeState {
+  int enabled; /* a field takes text: the IME should be on */
+  int restart; /* another field began being edited: end any composition, then begin */
+  int x, y;    /* candidate window position in window pixels (top left origin) */
+} BKImeState;
+/* Fills `state`; returns non-zero when enabled, restart or the position changed since the last
+ * call, which is the only time the host has anything to tell the platform. */
+int BK_ime_state(BKContext *ctx, BKImeState *state);
+/* Non-zero while a composition is in progress (a host should not treat keys as shortcuts). */
+int BK_ime_composing(BKContext *ctx);
 /* Raw-only input for host bindings (Tk's <KeyRelease>, <Button-2>, <ButtonRelease-3>):
  * forwarded to "events" nodes, no widget behavior. */
 int BK_key_release(BKContext *ctx, const char *keysym, int mods);

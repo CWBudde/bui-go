@@ -8,7 +8,7 @@ Open work for bui-go, as of 2026-11-08. Finished work belongs in `docs/design.md
 - [bui-go#8](https://github.com/CWBudde/bui-go/pull/8) is merged, so `main` pins BUI `v0.4.1`.
 - BUI's owner wants the binding in-tree at `bindings/go`. We asked four questions on
   [BUI#8](https://github.com/ppmpreetham/BUI/issues/8#issuecomment-6707514269), about the committed wasm, the second X11 host,
-  pinning and tags. **There is no answer yet, and Phase 3 depends on it.**
+  pinning and tags. There is no answer yet. Christian started Phase 3 anyway on 2026-11-08, in the fork only.
 - [bui-go#9](https://github.com/CWBudde/bui-go/pull/9) is merged, so `main` has the macOS baseline.
 - [bui-go#10](https://github.com/CWBudde/bui-go/pull/10) is merged, so `main` has the Cocoa spike. Christian counted its 1.6x as
   close and lifted the hold on the port, so the port goes ahead before the owner answers.
@@ -18,6 +18,7 @@ Open work for bui-go, as of 2026-11-08. Finished work belongs in `docs/design.md
 - [bui-go#13](https://github.com/CWBudde/bui-go/pull/13) is merged, so `main`'s Cocoa host has a menu, quits with Cmd+Q and draws
   during live resize.
 - [bui-go#14](https://github.com/CWBudde/bui-go/pull/14) is merged, so `main`'s Cocoa host follows scale changes between screens.
+- [bui-go#15](https://github.com/CWBudde/bui-go/pull/15) is merged, so `main` states its licence as BUI does.
 - BUI tagged `v0.5.0` on 2026-11-08, 112 commits past `v0.4.1` (see Phase 0).
 - A trial bump to BUI `bca7b8d` worked: the wasm built unmodified, reproduced byte for byte, and passed without cgo with the golden
   hashes unchanged. With cgo, only `TestNoDisplay` failed (see Phase 0).
@@ -33,9 +34,12 @@ None of this depends on the owner's answer.
 - [x] Pin the `v0.4.1` tag instead of a commit, as `BUI_kit.h` now asks, and update the docs that name `e3aba90`. (2026-11-07) —
       `BUI_COMMIT` holds the tag's commit, and the wasm module and libraries are rebuilt. The golden hashes did not change. Measurements
       stay attributed to `e3aba90`.
-- [ ] Decide how to handle cgo and Go hosts disagreeing on a Wayland-only system: cgo opens a native Wayland window, while the Go
+- [x] Decide how to handle cgo and Go hosts disagreeing on a Wayland-only system: cgo opens a native Wayland window, while the Go
       host needs X11 or XWayland. Decide between documenting this and forcing `BUI_WINDOW_BACKEND=x11` in the cgo engine.
-      Not reachable at `v0.4.1`, which predates BUI's Wayland host, so this is due at the first bump past that tag.
+      Not reachable at `v0.4.1`, which predates BUI's Wayland host, so this is due at the first bump past that tag. (2026-11-08) —
+      Christian chose a default: the cgo engine sets `BUI_WINDOW_BACKEND=x11` with C's `setenv` only when it is unset.
+      `TestWindowBackendDefault` fails without it. On the GNOME session with `DISPLAY` unset, `Supported` gave false by default
+      and true with `wayland`. "Wayland" in `docs/design.md` and the README say so.
 - [x] Rewrite "Licensing" in `docs/design.md`, the README and `NOTICES.md`. BUI now states GPL-3.0-or-later, with
       `GPL-2.0-or-later` SPDX headers kept on files. The reading still has no legal review. (2026-11-08) — bui-go mirrors BUI, as
       Christian chose: GPL-3.0-or-later as a whole, with its files' `GPL-2.0-or-later` headers unchanged. The README, "Licensing" and
@@ -46,8 +50,10 @@ None of this depends on the owner's answer.
 - [x] Make the load in `scripts/bench.sh` independent of the locale: on the German MacBook `sysctl` gives `7,05`. Set `LC_ALL=C`.
       (2026-11-08) — `LC_ALL=C` on the `sysctl` call alone. On the MacBook under `de_DE.UTF-8`, the old `load()` printed
       `1,47 2,14 2,30` and the new one `1.47 2.14 2.30`. The header of `bench/2026-11-07-a06371a.txt` now uses dots too.
-- [ ] Bump BUI to `v0.5.0`, tagged 2026-11-08: rebuild the wasm module and the libraries, and check the golden hashes. It makes the
-      Wayland decision above due.
+- [x] Bump BUI to `v0.5.0`, tagged 2026-11-08: rebuild the wasm module and the libraries, and check the golden hashes. It makes the
+      Wayland decision above due. (2026-11-08) — `BUI_COMMIT` holds `37e6fb4`. The kit only gained `BK_ime_*`, and the golden
+      hashes did not change on either engine. The libraries now hold BUI's Wayland host: `build-kit.sh` asks for it and fails
+      without it, and `NOTICES.md` credits the two protocol files whose generated code it contains.
 
 ## Phase 1: macOS baseline on the MacBook
 
@@ -141,7 +147,8 @@ The window draws correctly, and Christian counted 1.6x as close on 2026-11-07, a
 
 ## Phase 3: Upstream as `bindings/go`
 
-Starts when the owner answers on BUI#8. Their answers can change the scope below.
+Started on 2026-11-08 before the owner answered our four questions on BUI#8, as Christian chose. Their answers can still change the
+scope below. Everything stays in the fork until Christian decides to open the upstream PRs.
 
 - [ ] Fork to `CWBudde/BUI`. Push over HTTPS with the `CWBudde` `gh` token, or load the key for the `github.com-cwbudde` SSH alias,
       which the agent doesn't hold at the moment. Check the commit email first.

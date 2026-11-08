@@ -40,7 +40,8 @@ cmake -S "$src" -B "$build" \
 	-DBUI_BUILD_PYTHON_BINDINGS=OFF \
 	-DBUI_BUILD_UI=OFF \
 	-DBUI_BUILD_QT_BACKEND=OFF \
-	-DBUI_BUILD_IMGUI=OFF
+	-DBUI_BUILD_IMGUI=OFF \
+	-DBUI_WAYLAND=ON
 cmake --build "$build" --target bui_kit -j "$(nproc)"
 
 # Without the X11 headers CMake only prints a status line and the kit builds with
@@ -49,6 +50,13 @@ cmake --build "$build" --target bui_kit -j "$(nproc)"
 if [ "$goos" = linux ] && ! nm --defined-only "$build/kit/libbui_kit.a" 2>/dev/null |
 	awk '/\.o:$/ { x11 = ($0 == "kit_window_x11.c.o:") } x11 && $2 == "T" && ($3 == "BK_window_run" || $3 == "bk_x11_window_run") { found = 1 } END { exit !found }'; then
 	echo "build-kit: the X11 window host was not built; install the X11 headers (libx11-dev) and rebuild" >&2
+	exit 1
+fi
+
+# BUI_WAYLAND=ON also only prints a status line when the Wayland headers, wayland-scanner
+# or wayland-protocols are missing, and the libraries then lack the Wayland host.
+if [ "$goos" = linux ] && ! nm --defined-only "$build/kit/libbui_kit.a" 2>/dev/null | grep '^kit_window_wayland\.c\.o:$' >/dev/null; then
+	echo "build-kit: the Wayland window host was not built; install libwayland-dev, libxkbcommon-dev and wayland-protocols and rebuild" >&2
 	exit 1
 fi
 
