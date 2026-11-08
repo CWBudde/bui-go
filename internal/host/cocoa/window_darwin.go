@@ -67,18 +67,21 @@ var (
 	selDeclareTypes        = objc.RegisterName("declareTypes:owner:")
 	selSetString           = objc.RegisterName("setString:forType:")
 	selArrayWithObject     = objc.RegisterName("arrayWithObject:")
+	selInLiveResize        = objc.RegisterName("inLiveResize")
 )
 
 // window is one NSWindow on a kit context. It implements engine.WindowHost.
 type window struct {
-	host   *Host
-	id     engine.Window
-	nswin  objc.ID // 0 once closed
-	owned  objc.ID // the same window, which this holds a reference to until WindowFree
-	view   objc.ID
-	layer  objc.ID
-	ctx    engine.Context
-	raster engine.Raster
+	host  *Host
+	id    engine.Window
+	nswin objc.ID // 0 once closed
+	owned objc.ID // the same window, which this holds a reference to until WindowFree
+	view  objc.ID
+	layer objc.ID // held by the view
+	// delegate is held here until WindowFree, as a window doesn't retain its delegate.
+	delegate objc.ID
+	ctx      engine.Context
+	raster   engine.Raster
 
 	px            float64 // pixels per point
 	w, h          int     // the window's size in pixels, which is the raster's next size
@@ -120,10 +123,16 @@ func registerDelegate() bool {
 			}
 		})
 	}
+	// Dragging an edge runs AppKit's own loop, which doesn't return to the host's until the
+	// button goes up, so the window draws its new size here, as in the C host.
 	onResize := func(_ objc.ID, _ objc.SEL, note objc.ID) {
 		guarded(func() {
 			if win := current.findNS(note.Send(selObject)); win != nil {
 				win.syncSize()
+
+				if win.renderPending && objc.Send[bool](win.view, selInLiveResize) {
+					win.render()
+				}
 			}
 		})
 	}
@@ -195,7 +204,8 @@ func (win *window) create(title string, width, height int) {
 		uint64(styleTitled|styleClosable|styleMiniaturize|styleResizable), uint64(backingBuffered), false)
 	ns.Send(selSetReleased, false)
 	ns.Send(selSetTitle, nsString(title))
-	ns.Send(selSetDelegate, objc.ID(delegateClass).Send(selAlloc).Send(selInit))
+	delegate := objc.ID(delegateClass).Send(selAlloc).Send(selInit)
+	ns.Send(selSetDelegate, delegate)
 
 	// A layer-hosting view: the host owns the layer, and its contents are the frame.
 	view := objc.ID(viewClass).Send(selAlloc).Send(selInitFrame, rect)
@@ -204,6 +214,7 @@ func (win *window) create(title string, width, height int) {
 	layer.Send(selSetContentsGrav, nsString("topLeft"))
 	view.Send(selSetLayer, layer)
 	view.Send(selSetWantsLayer, true)
+	layer.Send(selRelease)
 	ns.Send(selSetContentView, view)
 	ns.Send(selMakeFirstResp, view)
 	ns.Send(selSetMouseMoved, true)
@@ -211,7 +222,7 @@ func (win *window) create(title string, width, height int) {
 	view.Send(selRelease)
 	ns.Send(selCenter)
 
-	win.nswin, win.owned, win.view, win.layer = ns, ns, view, layer
+	win.nswin, win.owned, win.view, win.layer, win.delegate = ns, ns, view, layer, delegate
 	win.flags = objc.Send[uint64](clsNSEvent, selModifierFlags)
 	win.syncSize()
 }
@@ -284,11 +295,15 @@ func (h *Host) WindowFree(id engine.Window) {
 		win.nswin.Send(selClose)
 	}
 
-	// AppKit may be inside this window's methods, if it is freed from one of its events.
+	win.owned.Send(selSetDelegate, objc.ID(0))
+
+	// AppKit may be inside this window's methods, or its delegate's, if it is freed from one
+	// of its events.
 	if h.depth > 0 {
-		h.dead = append(h.dead, win.owned)
+		h.dead = append(h.dead, win.owned, win.delegate)
 	} else {
 		win.owned.Send(selRelease)
+		win.delegate.Send(selRelease)
 	}
 
 	poolPop(pool)

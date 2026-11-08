@@ -35,6 +35,11 @@ var (
 	cgWarp           func(nsPoint) int32
 	cgAssociateMouse func(bool) int32
 	pthreadMainNP    func() int32
+	cfRunLoopGetMain func() uintptr
+	cfSourceCreate   func(alloc uintptr, order int, ctx *cfSourceContext) uintptr
+	cfAddSource      func(loop, source, mode uintptr)
+	cfSourceSignal   func(source uintptr)
+	cfRunLoopWakeUp  func(loop uintptr)
 	poolPush         func() uintptr
 	poolPop          func(uintptr)
 )
@@ -89,9 +94,11 @@ var (
 var (
 	clsNSApplication, clsNSEvent, clsNSDate, clsNSString, clsNSWindow,
 	clsNSScreen, clsCALayer, clsCATransaction,
-	clsNSCursor, clsNSPasteboard, clsNSArray, clsNSProcessInfo, clsNSTrackingArea objc.ID
+	clsNSCursor, clsNSPasteboard, clsNSArray, clsNSProcessInfo, clsNSTrackingArea,
+	clsNSMenu, clsNSMenuItem objc.ID
 	nsDefaultRunLoopMode objc.ID
 	srgbSpace            uintptr
+	cfCommonModes        uintptr
 	delegateClass        objc.Class
 )
 
@@ -120,6 +127,7 @@ func loadNow() bool {
 	clsNSCursor, clsNSPasteboard = cls("NSCursor"), cls("NSPasteboard")
 	clsNSArray, clsNSProcessInfo = cls("NSArray"), cls("NSProcessInfo")
 	clsNSTrackingArea = cls("NSTrackingArea")
+	clsNSMenu, clsNSMenuItem = cls("NSMenu"), cls("NSMenuItem")
 
 	pool := poolPush()
 	defer poolPop(pool)
@@ -129,7 +137,7 @@ func loadNow() bool {
 	nsDefaultRunLoopMode = nsString("kCFRunLoopDefaultMode").Send(selRetain)
 	srgbSpace = cgColorSpaceCreateNamed(uintptr(nsString("kCGColorSpaceSRGB")))
 
-	return srgbSpace != 0 && registerDelegate() && registerView()
+	return srgbSpace != 0 && registerDelegate() && registerView() && registerAppDelegate()
 }
 
 // bindFunctions opens the frameworks and binds the C functions.
@@ -159,6 +167,11 @@ func bindFunctions() bool {
 		"CGWarpMouseCursorPosition":              &cgWarp,
 		"CGAssociateMouseAndMouseCursorPosition": &cgAssociateMouse,
 		"pthread_main_np":                        &pthreadMainNP,
+		"CFRunLoopGetMain":                       &cfRunLoopGetMain,
+		"CFRunLoopSourceCreate":                  &cfSourceCreate,
+		"CFRunLoopAddSource":                     &cfAddSource,
+		"CFRunLoopSourceSignal":                  &cfSourceSignal,
+		"CFRunLoopWakeUp":                        &cfRunLoopWakeUp,
 		"objc_autoreleasePoolPush":               &poolPush,
 		"objc_autoreleasePoolPop":                &poolPop,
 	} {
@@ -169,6 +182,14 @@ func bindFunctions() bool {
 
 		purego.RegisterFunc(fn, p)
 	}
+
+	// CFRunLoopAddSource tells the common modes by the constant's address, not its content.
+	p, err := purego.Dlsym(purego.RTLD_DEFAULT, "kCFRunLoopCommonModes")
+	if err != nil {
+		return false
+	}
+
+	cfCommonModes = **(**uintptr)(unsafe.Pointer(&p))
 
 	return true
 }

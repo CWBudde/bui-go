@@ -338,7 +338,7 @@ func (h *Host) dispatch(ev objc.ID) {
 	h.keyUpDone = 0
 }
 
-// releaseDead releases windows freed while AppKit was inside one of their events.
+// releaseDead releases windows and delegates freed while AppKit was inside one of their events.
 func (h *Host) releaseDead() {
 	if h.depth > 0 {
 		return

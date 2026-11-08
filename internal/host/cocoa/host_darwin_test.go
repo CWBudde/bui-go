@@ -498,7 +498,8 @@ func eatWake(h *Host) bool {
 }
 
 // Every NSWindow goes away with WindowFree, closed by the host or closed before that the
-// way its button does. An object only the window holds shows when it has.
+// way its button does, and so do its layer and its delegate. An object only the watched
+// object holds shows when it has.
 func TestWindowFreeReleasesTheWindow(t *testing.T) {
 	requireDisplay(t)
 
@@ -515,11 +516,18 @@ func TestWindowFreeReleasesTheWindow(t *testing.T) {
 				win := f.h.find(id)
 				f.h.WindowShow(id)
 
-				weak := watchDealloc(t, win.nswin)
-				if weak == nil {
-					f.h.WindowFree(id)
+				watched := []struct {
+					name string
+					obj  objc.ID
+				}{{"NSWindow", win.nswin}, {"layer", win.layer}, {"delegate", win.delegate}}
+				weaks := make([]*deallocWatch, len(watched))
 
-					return
+				for i, w := range watched {
+					if weaks[i] = watchDealloc(t, w.obj); weaks[i] == nil {
+						f.h.WindowFree(id)
+
+						return
+					}
 				}
 
 				if tc.closedFirst {
@@ -531,8 +539,10 @@ func TestWindowFreeReleasesTheWindow(t *testing.T) {
 
 				f.h.WindowFree(id)
 
-				if !weak.gone(f.h, 2*time.Second) {
-					t.Error("the NSWindow is still alive")
+				for i, w := range watched {
+					if !weaks[i].gone(f.h, 2*time.Second) {
+						t.Errorf("the %s is still alive", w.name)
+					}
 				}
 			})
 		})
