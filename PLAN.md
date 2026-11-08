@@ -1,6 +1,6 @@
 # Plan
 
-Open work for bui-go, as of 2026-11-07. Finished work belongs in `docs/design.md` and the git history, not here.
+Open work for bui-go, as of 2026-11-08. Finished work belongs in `docs/design.md` and the git history, not here.
 
 ## Where we stand
 
@@ -12,6 +12,8 @@ Open work for bui-go, as of 2026-11-07. Finished work belongs in `docs/design.md
 - [bui-go#9](https://github.com/CWBudde/bui-go/pull/9) is merged, so `main` has the macOS baseline.
 - [bui-go#10](https://github.com/CWBudde/bui-go/pull/10) is merged, so `main` has the Cocoa spike. Christian counted its 1.6x as
   close and lifted the hold on the port, so the port goes ahead before the owner answers.
+- [bui-go#11](https://github.com/CWBudde/bui-go/pull/11) is merged, so `main` has macOS input. Its macOS CI job was red when it
+  merged: six input tests lost their clicks on GitHub's runner. The fix, a CI step and the docs follow it.
 - A trial bump to BUI `bca7b8d` worked: the wasm built unmodified, reproduced byte for byte, and passed without cgo with the golden
   hashes unchanged. With cgo, only `TestNoDisplay` failed (see Phase 0).
 
@@ -103,8 +105,13 @@ The window draws correctly, and Christian counted 1.6x as close on 2026-11-07, a
 - [ ] A menu with Cmd+Q, Hide and the window items, as `app_init` in the C host builds.
 - [ ] By hand on the MacBook: click, drag, scroll, type and copy and paste in `examples/counter` and a text field, as no test
       reaches the real mouse, keyboard or clipboard.
-- [ ] A test job on `macos-latest` for whatever works without a logged-in session, plus a documented manual run on the MacBook.
-- [ ] Update the README's platform table and "What has been run" in `docs/design.md`.
+- [x] A test job on `macos-latest` for whatever works without a logged-in session, plus a documented manual run on the MacBook.
+      (2026-11-08) — the runner has a logged-in session, so the existing macOS job now also runs `go test -v ./internal/host/cocoa`
+      without cgo, with none skipped for want of a display. Input tests wait until the window is on screen, as AppKit dropped
+      clicks sent before that: the package passed three times in a row on the runner with the wait, and lost clicks without it.
+      The command for the MacBook is in "Running the macOS tests by hand" in `docs/design.md`, and passed there as written.
+- [x] Update the README's platform table and "What has been run" in `docs/design.md`. (2026-11-08) — the Engines table names
+      Cocoa on macOS, and both say what CI runs on macOS.
 
 ## Phase 3: Upstream as `bindings/go`
 

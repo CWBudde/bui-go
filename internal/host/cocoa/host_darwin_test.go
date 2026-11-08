@@ -109,6 +109,36 @@ func (f *fixture) free() {
 	f.k.NodeFree(f.root)
 }
 
+var selOcclusionState = objc.RegisterName("occlusionState")
+
+// occlusionVisible is NSWindowOcclusionStateVisible.
+const occlusionVisible = 1 << 1
+
+// waitOnScreen pumps until the window server reports part of the window visible. AppKit drops
+// mouse events that reach a window before then, as no hand could click it yet. A fast Mac
+// rarely shows that gap, but GitHub's macOS runner lost most clicks sent right after a show.
+func (f *fixture) waitOnScreen(tb testing.TB, win *window) {
+	tb.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+
+	for objc.Send[uint64](win.nswin, selOcclusionState)&occlusionVisible == 0 {
+		if time.Now().After(deadline) {
+			tb.Error("the window never came on screen")
+
+			return
+		}
+
+		// Events and notifications about the window are autoreleased, and nothing else drains
+		// them outside the loop: the window would outlive WindowFree.
+		pool := poolPush()
+
+		f.h.pump(clsNSDate.Send(selDateSinceNow, 0.02))
+
+		poolPop(pool)
+	}
+}
+
 // A window opens with no error from AppKit, and its raster has backing-scale pixels.
 func TestWindowSizeIsInBackingPixels(t *testing.T) {
 	requireDisplay(t)

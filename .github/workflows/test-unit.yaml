@@ -87,6 +87,25 @@ jobs:
         if: runner.os != 'Linux'
         run: go test ./...
 
+      # The runner has a logged-in session, so the Cocoa host opens real windows and takes the
+      # events its tests make. Programs on macOS build it without cgo, so these do too. Without
+      # the session every test would skip and go test still pass, so any skip but the one for
+      # the subprocess fails the step.
+      - name: Run the Cocoa tests without cgo
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          log="$RUNNER_TEMP/cocoa.log"
+          go test -count=1 -v ./internal/host/cocoa > "$log" 2>&1 || { cat "$log"; exit 1; }
+          echo "$(grep -c '^--- PASS' "$log") passed, $(grep -c '^--- SKIP' "$log") skipped"
+          if grep '^--- SKIP' "$log" | grep -v '^--- SKIP: TestChildProcess '; then
+            echo "unexpected skips:"
+            grep -A1 '^--- SKIP' "$log"
+            exit 1
+          fi
+
   cross-build:
     name: build without cgo
     runs-on: ubuntu-latest

@@ -95,6 +95,7 @@ func openInput(t *testing.T, typ string, width, height int) *inputFixture {
 	win := f.h.find(id)
 	f.h.WindowShow(id)
 	win.render()
+	f.waitOnScreen(t, win)
 
 	return &inputFixture{fixture: f, t: t, id: id, win: win, child: child}
 }

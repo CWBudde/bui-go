@@ -48,7 +48,8 @@ func main() {
 }
 ```
 
-CI runs the tests on macOS, but only cross-builds for Windows, so that platform is untested.
+CI runs the tests on macOS, including the Cocoa host's tests, which open real windows, but only cross-builds for Windows, so that platform is
+untested.
 
 In a window program, the same calls look like this:
 
@@ -66,10 +67,10 @@ bui.Do(func() { clock.SetStr("text", "updated") }) // safe from any goroutine
 
 The same API runs on two engines, chosen when you build:
 
-| Build                                 | Engine                                                                              | Windows                    | Needs               |
-| ------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------- | ------------------- |
-| Linux amd64 with cgo                  | Native: static libraries in `lib/`                                                  | X11                        | C and C++ toolchain |
-| Anything else, or the tag `bui_nocgo` | WebAssembly: an embedded module, in [wazero](https://github.com/tetratelabs/wazero) | X11 in pure Go, Linux only | Nothing but Go      |
+| Build                                 | Engine                                                                              | Windows                                     | Needs               |
+| ------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------- | ------------------- |
+| Linux amd64 with cgo                  | Native: static libraries in `lib/`                                                  | X11                                         | C and C++ toolchain |
+| Anything else, or the tag `bui_nocgo` | WebAssembly: an embedded module, in [wazero](https://github.com/tetratelabs/wazero) | X11 on Linux and Cocoa on macOS, in pure Go | Nothing but Go      |
 
 `go build -tags bui_nocgo` selects the wasm engine on a machine that would otherwise use cgo. Both engines draw the same
 pixels: the tests compare them exactly. On Windows the wasm engine runs headless, and `NewWindow` and `Run` report `ErrNoDisplay`.
