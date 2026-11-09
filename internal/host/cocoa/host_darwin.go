@@ -109,6 +109,10 @@ func (h *Host) start() {
 		return
 	}
 
+	if !appChecked {
+		appChecked, appForeign = true, appExists()
+	}
+
 	h.app = clsNSApplication.Send(selSharedApplication)
 
 	policy := activationPolicyRegular
@@ -121,6 +125,12 @@ func (h *Host) start() {
 	h.app.Send(selSetActivationPolicy, policy)
 	h.setUpApp()
 	h.app.Send(selFinishLaunching)
+
+	// After launching, which may install AppKit's own handler for the quit Apple Event.
+	if appForeign {
+		h.routeQuit()
+	}
+
 	startWakeSource()
 	h.ready.Store(true)
 }

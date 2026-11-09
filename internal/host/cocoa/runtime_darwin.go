@@ -95,7 +95,7 @@ var (
 	clsNSApplication, clsNSEvent, clsNSDate, clsNSString, clsNSWindow,
 	clsNSScreen, clsCALayer, clsCATransaction,
 	clsNSCursor, clsNSPasteboard, clsNSArray, clsNSProcessInfo, clsNSTrackingArea,
-	clsNSMenu, clsNSMenuItem objc.ID
+	clsNSMenu, clsNSMenuItem, clsNSAppleEventManager objc.ID
 	nsDefaultRunLoopMode objc.ID
 	srgbSpace            uintptr
 	cfCommonModes        uintptr
@@ -128,6 +128,7 @@ func loadNow() bool {
 	clsNSArray, clsNSProcessInfo = cls("NSArray"), cls("NSProcessInfo")
 	clsNSTrackingArea = cls("NSTrackingArea")
 	clsNSMenu, clsNSMenuItem = cls("NSMenu"), cls("NSMenuItem")
+	clsNSAppleEventManager = cls("NSAppleEventManager")
 
 	pool := poolPush()
 	defer poolPop(pool)

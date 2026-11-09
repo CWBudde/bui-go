@@ -504,6 +504,10 @@ On 2026-11-08 the host got the rest of what `app_init` and the window delegate d
   cancelling, so Cmd+Q, the Dock's Quit and the quit Apple Event that logging out sends all end the loop. AppKit's own answer
   would `exit()` from inside it. The tests quit in a child process that must print a line after `Run` returns: without the delegate,
   `terminate:` ends the child with exit status 0.
+- **An NSApp made before the host keeps its delegate,** as in a process that embeds the host. As the C host's `route_quit` does, the
+  host then sends the application menu's Quit and the quit Apple Event to its own delegate, which closes every window. With no window
+  of the host's left, they go on to that application's `terminate:`. A `terminate:` sent to NSApp itself stays with that
+  application's delegate, in the C host too. A test makes NSApp first, with a delegate that lets AppKit end the process.
 - **Dragging an edge keeps drawing.** AppKit runs its own loop until the button goes up. `windowDidResize:` renders each new size
   during it, as in the C host. A wake also signals a run-loop source in the common modes, so `Do`, and the renders it asks for,
   run inside that loop and in others that take only their own events. The wake's posted event still ends the host's own wait.
