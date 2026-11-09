@@ -448,6 +448,31 @@ func TestBadSizesStillMakeAWindow(t *testing.T) {
 	f.checkPresented("the smallest window")
 }
 
+// A title longer than one request goes out whole. xgb truncates a request's length field,
+// so one request would make the server read the rest as further requests.
+func TestLongTitleKeepsTheConnection(t *testing.T) {
+	f := newFixture(t, "frame", 100, 40)
+	title := strings.Repeat("ä", f.h.maxData) // twice the limit, in bytes
+
+	f.w.setProperty(f.h.atoms.netWMName, f.h.atoms.utf8, 8, []byte(title))
+
+	prop, err := xproto.GetProperty(f.h.c, false, f.w.xid, f.h.atoms.netWMName, f.h.atoms.utf8,
+		0, uint32(len(title)+3)/4).Reply()
+	if err != nil {
+		t.Fatalf("the connection did not survive: %v", err)
+	}
+
+	if string(prop.Value) != title {
+		t.Errorf("the title has %d bytes, want %d", len(prop.Value), len(title))
+	}
+
+	f.settle()
+
+	if f.h.events.isClosed() || f.h.events.errors != 0 {
+		t.Errorf("closed = %v, %d X errors", f.h.events.isClosed(), f.h.events.errors)
+	}
+}
+
 func TestClickReachesTheKit(t *testing.T) {
 	f := newFixture(t, "button", 200, 80)
 

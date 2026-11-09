@@ -137,10 +137,25 @@ func (win *window) create(title string) bool {
 	return true
 }
 
-// setProperty replaces a property of this window.
+// setProperty replaces a property of this window. What does not fit one request goes out
+// as a replace and appends, as xgb truncates a request's length field rather than failing.
+// maxData is a multiple of 4, so every part holds whole items of any format.
 func (win *window) setProperty(prop, typ xproto.Atom, format byte, data []byte) {
-	xproto.ChangeProperty(win.host.c, xproto.PropModeReplace, win.xid, prop, typ, format,
-		uint32(len(data))/uint32(format/8), data) //nolint:gosec // data is far below 4 GiB
+	h := win.host
+	mode := byte(xproto.PropModeReplace)
+
+	for {
+		part := data[:min(len(data), h.maxData)]
+		xproto.ChangeProperty(h.c, mode, win.xid, prop, typ, format,
+			uint32(len(part))/uint32(format/8), part) //nolint:gosec // part fits one request
+
+		data = data[len(part):]
+		if len(data) == 0 {
+			return
+		}
+
+		mode = xproto.PropModeAppend
+	}
 }
 
 func atomBytes(atoms ...xproto.Atom) []byte {
