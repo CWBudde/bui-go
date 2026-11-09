@@ -58,6 +58,9 @@ type window struct {
 
 	tipID             int
 	tipDue, customDue time.Time
+
+	// late counts this window's pastes that timed out with no answer seen since.
+	late int
 }
 
 var _ engine.WindowHost = (*window)(nil)
@@ -137,10 +140,25 @@ func (win *window) create(title string) bool {
 	return true
 }
 
-// setProperty replaces a property of this window.
+// setProperty replaces a property of this window. What does not fit one request goes out
+// as a replace and appends, as xgb truncates a request's length field rather than failing.
+// maxData is a multiple of 4, so every part holds whole items of any format.
 func (win *window) setProperty(prop, typ xproto.Atom, format byte, data []byte) {
-	xproto.ChangeProperty(win.host.c, xproto.PropModeReplace, win.xid, prop, typ, format,
-		uint32(len(data))/uint32(format/8), data) //nolint:gosec // data is far below 4 GiB
+	h := win.host
+	mode := byte(xproto.PropModeReplace)
+
+	for {
+		part := data[:min(len(data), h.maxData)]
+		xproto.ChangeProperty(h.c, mode, win.xid, prop, typ, format,
+			uint32(len(part))/uint32(format/8), part) //nolint:gosec // part fits one request
+
+		data = data[len(part):]
+		if len(data) == 0 {
+			return
+		}
+
+		mode = xproto.PropModeAppend
+	}
 }
 
 func atomBytes(atoms ...xproto.Atom) []byte {
@@ -256,14 +274,23 @@ func (win *window) present(all bool) {
 	}
 }
 
-// putRect sends a rectangle in as many requests as the server's limit asks for.
+// putRect sends a rectangle in as many requests as the server's limit asks for. A server
+// may take requests as short as 16 KiB, so a row that does not fit one goes in columns.
 func (h *Host) putRect(win *window, pixels []byte, d engine.Rect) {
 	const pixelSize = 4
 
 	stride := pixelSize * win.rasterW
 	row := pixelSize * d.W
 
-	if row <= 0 || d.H <= 0 || row > h.maxData {
+	if row <= 0 || d.H <= 0 {
+		return
+	}
+
+	if cols := h.maxData / pixelSize; d.W > cols {
+		for x := d.X; x < d.X+d.W; x += cols {
+			h.putRect(win, pixels, engine.Rect{X: x, Y: d.Y, W: min(cols, d.X+d.W-x), H: d.H})
+		}
+
 		return
 	}
 

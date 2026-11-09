@@ -4,6 +4,7 @@ package x11
 
 import (
 	"bytes"
+	"time"
 
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
@@ -32,8 +33,10 @@ func (win *window) ClipboardGet() (string, bool) {
 
 // paste asks the clipboard's owner for its text. Each request names its own property, so
 // that an owner answering after the timeout cannot answer this one. A refusal names no
-// property: after a timeout it may be the late answer, so only the timeout can end the
-// wait, which fails the same way.
+// property, so win.late counts the requests that timed out with no answer seen since. An
+// owner answers in order, so while one is outstanding, the next answer that is not ours,
+// refusal or not, is the oldest late one, and the wait goes on. Late answers leave the
+// queue as they come, so none stays for a later paste to take as its own.
 func (win *window) paste() (string, bool) {
 	h := win.host
 	property := h.atoms.selections[h.selectionNext]
@@ -41,29 +44,33 @@ func (win *window) paste() (string, bool) {
 
 	xproto.ConvertSelection(h.c, win.xid, h.atoms.clipboard, h.atoms.utf8, property, xproto.TimeCurrentTime)
 
-	ev := h.events.waitFor(clipboardTimeout, func(ev xgb.Event) bool {
+	deadline := time.Now().Add(clipboardTimeout)
+
+	for {
+		ev := h.events.waitFor(time.Until(deadline), func(ev xgb.Event) bool {
+			sn, ok := ev.(xproto.SelectionNotifyEvent)
+
+			return ok && sn.Requestor == win.xid && sn.Selection == h.atoms.clipboard
+		})
+
 		sn, ok := ev.(xproto.SelectionNotifyEvent)
-		if !ok || sn.Requestor != win.xid {
-			return false
+
+		switch {
+		case !ok:
+			win.late++
+
+			return "", false
+		case sn.Property == property:
+			// Every earlier answer came before this one.
+			win.late = 0
+
+			return win.readSelection(property)
+		case win.late > 0:
+			win.late--
+		case sn.Property == xproto.AtomNone:
+			return "", false
 		}
-
-		return sn.Property == property || sn.Property == xproto.AtomNone && !h.selectionLate
-	})
-
-	sn, ok := ev.(xproto.SelectionNotifyEvent)
-	if !ok {
-		h.selectionLate = true
-
-		return "", false
 	}
-
-	if sn.Property == xproto.AtomNone {
-		return "", false
-	}
-
-	h.selectionLate = false
-
-	return win.readSelection(property)
 }
 
 // readSelection takes the text the clipboard's owner stored on this window. It refuses text
@@ -105,6 +112,11 @@ func (win *window) ClipboardSet(text string) {
 
 // handleSelectionRequest answers someone pasting what we copied.
 func (h *Host) handleSelectionRequest(rq xproto.SelectionRequestEvent) {
+	// An obsolete requestor names no property. ICCCM has the owner use the target then.
+	if rq.Property == xproto.AtomNone {
+		rq.Property = rq.Target
+	}
+
 	reply := xproto.SelectionNotifyEvent{
 		Time:      rq.Time,
 		Requestor: rq.Requestor,

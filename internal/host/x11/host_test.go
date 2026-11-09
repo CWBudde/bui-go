@@ -381,6 +381,21 @@ func TestPresentSplitsLargeFrames(t *testing.T) {
 	f.checkPresented("a large frame")
 }
 
+// A server may take requests as short as 16 KiB, shorter than a row of a wide window.
+// Such rows go out in columns. This one takes 64 pixels a request.
+func TestPresentSplitsWideRows(t *testing.T) {
+	f := newFixture(t, "button", 300, 100)
+	f.k.SetStr(f.child, "text", "Hover me")
+	f.h.maxData = 4 * 64
+	f.show()
+
+	f.checkPresented("the first frame")
+
+	x, y := f.center()
+	f.motion(x, y, 0)
+	f.checkPresented("the hovered frame")
+}
+
 func TestExposeRedrawsTheWholeWindow(t *testing.T) {
 	f := newFixture(t, "button", 200, 80)
 	f.show()
@@ -446,6 +461,31 @@ func TestBadSizesStillMakeAWindow(t *testing.T) {
 
 	f.show()
 	f.checkPresented("the smallest window")
+}
+
+// A title longer than one request goes out whole. xgb truncates a request's length field,
+// so one request would make the server read the rest as further requests.
+func TestLongTitleKeepsTheConnection(t *testing.T) {
+	f := newFixture(t, "frame", 100, 40)
+	title := strings.Repeat("ä", f.h.maxData) // twice the limit, in bytes
+
+	f.w.setProperty(f.h.atoms.netWMName, f.h.atoms.utf8, 8, []byte(title))
+
+	prop, err := xproto.GetProperty(f.h.c, false, f.w.xid, f.h.atoms.netWMName, f.h.atoms.utf8,
+		0, uint32(len(title)+3)/4).Reply()
+	if err != nil {
+		t.Fatalf("the connection did not survive: %v", err)
+	}
+
+	if string(prop.Value) != title {
+		t.Errorf("the title has %d bytes, want %d", len(prop.Value), len(title))
+	}
+
+	f.settle()
+
+	if f.h.events.isClosed() || f.h.events.errors != 0 {
+		t.Errorf("closed = %v, %d X errors", f.h.events.isClosed(), f.h.events.errors)
+	}
 }
 
 func TestClickReachesTheKit(t *testing.T) {
@@ -939,6 +979,39 @@ func TestClipboardIgnoresLateAnswers(t *testing.T) {
 			<-done
 		})
 	}
+}
+
+// A late refusal that comes while a later paste waits must not stay behind for the one
+// after it, which would take it for its own and find no text.
+func TestClipboardLateRefusalAnswersNoLaterPaste(t *testing.T) {
+	f := newFixture(t, "text", 300, 40)
+	f.show()
+
+	peer, err := xgb.NewConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+
+	late := clipboardTimeout + 50*time.Millisecond
+	done := peerAnswers(t, f, peer, []peerAnswer{
+		{delay: late},
+		{delay: 100 * time.Millisecond, text: "zwei"},
+		{text: "drei"},
+	})
+
+	// No loop turn runs in between, as when pastes follow each other within one turn.
+	if got, ok := f.w.ClipboardGet(); ok {
+		t.Errorf("the first paste got %q before the owner answered", got)
+	}
+
+	for _, want := range []string{"zwei", "drei"} {
+		if got, ok := f.w.ClipboardGet(); !ok || got != want {
+			t.Errorf("got %q, %v, want %q", got, ok, want)
+		}
+	}
+
+	<-done
 }
 
 // peerAnswer is how a peer answers one request: after a delay, with text or, if there is
@@ -1596,6 +1669,57 @@ func TestClipboardServesOnlyWhatFitsARequest(t *testing.T) {
 				t.Errorf("closed = %v, %d X errors", f.h.events.isClosed(), f.h.events.errors)
 			}
 		})
+	}
+}
+
+// An obsolete requestor names no property. ICCCM has the owner use the target as the
+// property then.
+func TestClipboardServesARequestWithoutProperty(t *testing.T) {
+	f := newFixture(t, "text", 300, 40)
+	f.show()
+
+	peer, err := xgb.NewConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+
+	xid, err := xproto.NewWindowId(peer)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	screen := xproto.Setup(peer).DefaultScreen(peer)
+
+	if err := xproto.CreateWindowChecked(peer, screen.RootDepth, xid, screen.Root, 0, 0, 1, 1, 0,
+		xproto.WindowClassInputOutput, screen.RootVisual, 0, nil).Check(); err != nil {
+		t.Fatal(err)
+	}
+
+	f.w.ClipboardSet("alt")
+	f.h.handleSelectionRequest(xproto.SelectionRequestEvent{
+		Requestor: xid, Selection: f.h.atoms.clipboard, Target: f.h.atoms.utf8, Property: xproto.AtomNone,
+	})
+
+	ev, xerr := peer.WaitForEvent()
+	if xerr != nil {
+		t.Fatal(xerr)
+	}
+
+	sn, ok := ev.(xproto.SelectionNotifyEvent)
+	if !ok || sn.Property != f.h.atoms.utf8 {
+		t.Fatalf("got %v, want the target as the property", ev)
+	}
+
+	prop, err := xproto.GetProperty(peer, true, xid, sn.Property, xproto.GetPropertyTypeAny, 0, 1<<16).Reply()
+	if err != nil || string(prop.Value) != "alt" {
+		t.Errorf("the property holds %v, %v", prop, err)
+	}
+
+	f.settle()
+
+	if f.h.events.errors != 0 {
+		t.Errorf("%d X errors", f.h.events.errors)
 	}
 }
 
