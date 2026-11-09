@@ -3,6 +3,7 @@
 package cocoa
 
 import (
+	"math"
 	"os"
 	"strconv"
 	"time"
@@ -329,11 +330,17 @@ func (win *window) resized() {
 func (win *window) syncSize() {
 	b := objc.Send[nsRect](win.nswin.Send(selContentView), selBounds)
 
-	w, h := int(b.Size.W*win.px), int(b.Size.H*win.px)
+	w, h := backingPixels(b.Size, win.px)
 	if w != win.w || h != win.h {
 		win.w, win.h = w, h
 		win.renderPending = true
 	}
+}
+
+// backingPixels is a size in points in whole pixels at px pixels per point. It rounds, as the
+// C host's lround does, so that a product a hair under a whole pixel keeps that pixel.
+func backingPixels(points nsSize, px float64) (w, h int) {
+	return int(math.Round(points.W * px)), int(math.Round(points.H * px))
 }
 
 func (h *Host) find(id engine.Window) *window {
