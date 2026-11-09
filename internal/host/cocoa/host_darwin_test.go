@@ -4,8 +4,10 @@ package cocoa
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -642,6 +644,58 @@ func TestResizeReachesTheRaster(t *testing.T) {
 
 		if got := layerPixels(t, win); len(got) != win.rasterW*win.rasterH*pixelSize {
 			t.Errorf("%d bytes from the layer", len(got))
+		}
+	})
+}
+
+// A burst longer than a turn's budget loses no event: what one turn leaves, the next takes.
+// A lost release would leave the button held. The release comes right after the budget.
+func TestEventsPastTheBudgetAreKept(t *testing.T) {
+	requireDisplay(t)
+
+	onMain(func() {
+		f := openInput(t, "button", 200, 80)
+		defer f.close()
+
+		spy := &buttonSpy{Kit: f.h.kit}
+		f.h.kit = spy
+
+		defer func() { f.h.kit = spy.Kit }()
+
+		pool := poolPush()
+		defer poolPop(pool)
+
+		// Nothing else may be queued ahead of the burst, or it would shift the release.
+		for range 100 {
+			if f.h.app.Send(selNextEvent, eventMaskAny, objc.ID(0), nsDefaultRunLoopMode, false) == 0 {
+				break
+			}
+
+			f.h.pump(objc.ID(0))
+		}
+
+		// Filler: application-defined events that aren't the wake's, which AppKit passes over.
+		for range maxEventsPerTurn - 1 {
+			filler := clsNSEvent.Send(selOtherEvent, uint64(eventTypeAppDefined), nsPoint{}, uint64(0), float64(0),
+				int64(0), objc.ID(0), int16(0), int64(0), int64(0))
+			f.h.app.Send(selPostEvent, filler, false)
+		}
+
+		x, y := f.center()
+		window := objc.Send[int64](f.win.nswin, selWindowNumber)
+
+		for _, kind := range []uint64{eventLeftDown, eventLeftUp} {
+			ev := clsNSEvent.Send(selMouseEvent, kind, f.windowPoint(x, y), uint64(0), f.now(), window, objc.ID(0),
+				int64(0), int64(1), float32(1))
+			f.h.app.Send(selPostEvent, ev, false)
+		}
+
+		f.h.pump(objc.ID(0))
+		f.h.pump(objc.ID(0))
+
+		want := []string{fmt.Sprintf("press %d", engine.ModButton1), "release 0"}
+		if !slices.Equal(spy.calls, want) {
+			t.Errorf("calls %q, want %q", spy.calls, want)
 		}
 	})
 }

@@ -279,16 +279,17 @@ func (h *Host) turn() {
 }
 
 // pump waits for an event until the date, then handles what is queued. A nil date doesn't wait.
+// Past the budget it takes no more events off the queue, so the next turn handles them.
 func (h *Host) pump(until objc.ID) {
 	ev := h.app.Send(selNextEvent, eventMaskAny, until, nsDefaultRunLoopMode, true)
 
-	for range maxEventsPerTurn {
-		if ev == 0 {
-			return
-		}
-
+	for n := 1; ev != 0; n++ {
 		if !isWake(ev) {
 			h.dispatch(ev)
+		}
+
+		if n == maxEventsPerTurn {
+			return
 		}
 
 		ev = h.app.Send(selNextEvent, eventMaskAny, objc.ID(0), nsDefaultRunLoopMode, true)
