@@ -648,6 +648,49 @@ func TestResizeReachesTheRaster(t *testing.T) {
 	})
 }
 
+// Switching between a zoomed window and full screen may send no resize, so entering and
+// leaving full screen read the size, as in the C host. The test makes the host's size stale
+// and sends each notification to the delegate.
+func TestFullScreenRereadsTheSize(t *testing.T) {
+	requireDisplay(t)
+
+	onMain(func() {
+		f := newFixture()
+		defer f.free()
+
+		id := f.h.WindowNew(f.ctx, "bui cocoa test", 200, 100)
+		defer f.h.WindowFree(id)
+
+		win := f.h.find(id)
+		win.render()
+
+		pool := poolPush()
+		defer poolPop(pool)
+
+		delegate := win.nswin.Send(selDelegate)
+		w, h := win.w, win.h
+
+		for _, name := range []string{"windowDidEnterFullScreen:", "windowDidExitFullScreen:"} {
+			sel := objc.RegisterName(name)
+			if !objc.Send[bool](delegate, objc.RegisterName("respondsToSelector:"), sel) {
+				t.Errorf("the window delegate has no %s", name)
+
+				continue
+			}
+
+			win.w, win.h, win.renderPending = 1, 1, false
+
+			note := objc.ID(objc.GetClass("NSNotification")).Send(selNotification, nsString("bui-go test"), win.nswin)
+			delegate.Send(sel, note)
+
+			if win.w != w || win.h != h || !win.renderPending {
+				t.Errorf("%s: size %dx%d, render pending %v, want %dx%d and true", name, win.w, win.h,
+					win.renderPending, w, h)
+			}
+		}
+	})
+}
+
 // A burst longer than a turn's budget loses no event: what one turn leaves, the next takes.
 // A lost release would leave the button held. The release comes right after the budget.
 func TestEventsPastTheBudgetAreKept(t *testing.T) {

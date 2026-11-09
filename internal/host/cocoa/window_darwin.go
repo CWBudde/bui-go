@@ -126,6 +126,8 @@ func registerDelegate() bool {
 			}
 		})
 	}
+	// Full screen comes here too: AppKit may send no resize when switching between a zoomed
+	// window and full screen, as the C host notes.
 	onResize := func(_ objc.ID, _ objc.SEL, note objc.ID) {
 		guarded(func() {
 			if win := current.findNS(note.Send(selObject)); win != nil {
@@ -154,6 +156,8 @@ func registerDelegate() bool {
 	cls, err := objc.RegisterClass("BUIGoWindowDelegate", objc.GetClass("NSObject"), nil, nil, []objc.MethodDef{
 		{Cmd: objc.RegisterName("windowWillClose:"), Fn: onClose},
 		{Cmd: objc.RegisterName("windowDidResize:"), Fn: onResize},
+		{Cmd: objc.RegisterName("windowDidEnterFullScreen:"), Fn: onResize},
+		{Cmd: objc.RegisterName("windowDidExitFullScreen:"), Fn: onResize},
 		{Cmd: objc.RegisterName("windowDidChangeBackingProperties:"), Fn: onBacking},
 		{Cmd: objc.RegisterName("windowDidBecomeKey:"), Fn: onBecomeKey},
 	})
