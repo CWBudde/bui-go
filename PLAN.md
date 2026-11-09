@@ -21,8 +21,8 @@ Open work for bui-go, as of 2026-11-08. Finished work belongs in `docs/design.md
 - [bui-go#15](https://github.com/CWBudde/bui-go/pull/15) is merged, so `main` states its licence as BUI does.
 - [bui-go#16](https://github.com/CWBudde/bui-go/pull/16) is merged, so `main` pins BUI `v0.5.0` and the cgo engine opens X11
   windows unless `BUI_WINDOW_BACKEND` says otherwise.
-- [bui-go#17](https://github.com/CWBudde/bui-go/pull/17) is open: it refuses nested Window and Headless contexts, a bug review found
-  in the fork's PR 1.
+- [bui-go#17](https://github.com/CWBudde/bui-go/pull/17) is merged, so `main` refuses nested Window and Headless contexts, a bug
+  review found in the fork's PR 1.
 - The three Phase 3 PRs are open in the fork, not upstream: [CWBudde/BUI#1](https://github.com/CWBudde/BUI/pull/1),
   [CWBudde/BUI#2](https://github.com/CWBudde/BUI/pull/2) and [CWBudde/BUI#3](https://github.com/CWBudde/BUI/pull/3). CI is green on
   all three.
@@ -192,9 +192,10 @@ scope below. Everything stays in the fork until Christian decides to open the up
 - [x] Each PR updates `CHANGELOG.md`, `docs/`, the README's bindings table and the website, and lists its known limits.
       (2026-11-08) — all three PRs do, and PR 2 states that question 2 is open. PR 3 states that the check with a second screen
       is open, and that dead keys type the plain character.
-- [ ] Before each PR, fetch the module from a scratch module at `github.com/CWBudde/BUI/bindings/go@<sha>` to prove it works outside
-      the repo, and confirm BUI's `cmake`, `rust` and `package` jobs are unaffected. (2026-11-08) — partial: PR 1's module at
-      `d4bb297` fetched through the Go proxy, and its README example ran with `CGO_ENABLED=0`. BUI's jobs are green on all three.
+- [ ] Before each PR, prove the module works outside the repo: a scratch module requires `github.com/ppmpreetham/BUI/bindings/go`
+      and replaces it with `github.com/CWBudde/BUI/bindings/go <sha>`, as the module declares the upstream path. Confirm BUI's
+      `cmake`, `rust` and `package` jobs are unaffected too. (2026-11-08) — partial: with that `replace`, the Go proxy fetched PR
+      1's module at `d4bb297`, and its README example ran with `CGO_ENABLED=0`. BUI's jobs are green on all three.
       PR 2 and PR 3 still need the scratch module, and all three need it again on the commit that goes upstream.
 - [ ] Open the upstream PRs on `ppmpreetham/BUI`. Christian decides when, after the answer on BUI#8. Rebase onto upstream's `main`
       first: the fork stays at `e8126ca`.
