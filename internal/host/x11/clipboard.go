@@ -112,6 +112,11 @@ func (win *window) ClipboardSet(text string) {
 
 // handleSelectionRequest answers someone pasting what we copied.
 func (h *Host) handleSelectionRequest(rq xproto.SelectionRequestEvent) {
+	// An obsolete requestor names no property. ICCCM has the owner use the target then.
+	if rq.Property == xproto.AtomNone {
+		rq.Property = rq.Target
+	}
+
 	reply := xproto.SelectionNotifyEvent{
 		Time:      rq.Time,
 		Requestor: rq.Requestor,

@@ -1657,6 +1657,57 @@ func TestClipboardServesOnlyWhatFitsARequest(t *testing.T) {
 	}
 }
 
+// An obsolete requestor names no property. ICCCM has the owner use the target as the
+// property then.
+func TestClipboardServesARequestWithoutProperty(t *testing.T) {
+	f := newFixture(t, "text", 300, 40)
+	f.show()
+
+	peer, err := xgb.NewConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+
+	xid, err := xproto.NewWindowId(peer)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	screen := xproto.Setup(peer).DefaultScreen(peer)
+
+	if err := xproto.CreateWindowChecked(peer, screen.RootDepth, xid, screen.Root, 0, 0, 1, 1, 0,
+		xproto.WindowClassInputOutput, screen.RootVisual, 0, nil).Check(); err != nil {
+		t.Fatal(err)
+	}
+
+	f.w.ClipboardSet("alt")
+	f.h.handleSelectionRequest(xproto.SelectionRequestEvent{
+		Requestor: xid, Selection: f.h.atoms.clipboard, Target: f.h.atoms.utf8, Property: xproto.AtomNone,
+	})
+
+	ev, xerr := peer.WaitForEvent()
+	if xerr != nil {
+		t.Fatal(xerr)
+	}
+
+	sn, ok := ev.(xproto.SelectionNotifyEvent)
+	if !ok || sn.Property != f.h.atoms.utf8 {
+		t.Fatalf("got %v, want the target as the property", ev)
+	}
+
+	prop, err := xproto.GetProperty(peer, true, xid, sn.Property, xproto.GetPropertyTypeAny, 0, 1<<16).Reply()
+	if err != nil || string(prop.Value) != "alt" {
+		t.Errorf("the property holds %v, %v", prop, err)
+	}
+
+	f.settle()
+
+	if f.h.events.errors != 0 {
+		t.Errorf("%d X errors", f.h.events.errors)
+	}
+}
+
 func motion(win xproto.Window, state uint16, x int16) xproto.MotionNotifyEvent {
 	return xproto.MotionNotifyEvent{Event: win, State: state, EventX: x}
 }
