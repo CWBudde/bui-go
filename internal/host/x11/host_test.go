@@ -966,6 +966,39 @@ func TestClipboardIgnoresLateAnswers(t *testing.T) {
 	}
 }
 
+// A late refusal that comes while a later paste waits must not stay behind for the one
+// after it, which would take it for its own and find no text.
+func TestClipboardLateRefusalAnswersNoLaterPaste(t *testing.T) {
+	f := newFixture(t, "text", 300, 40)
+	f.show()
+
+	peer, err := xgb.NewConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+
+	late := clipboardTimeout + 50*time.Millisecond
+	done := peerAnswers(t, f, peer, []peerAnswer{
+		{delay: late},
+		{delay: 100 * time.Millisecond, text: "zwei"},
+		{text: "drei"},
+	})
+
+	// No loop turn runs in between, as when pastes follow each other within one turn.
+	if got, ok := f.w.ClipboardGet(); ok {
+		t.Errorf("the first paste got %q before the owner answered", got)
+	}
+
+	for _, want := range []string{"zwei", "drei"} {
+		if got, ok := f.w.ClipboardGet(); !ok || got != want {
+			t.Errorf("got %q, %v, want %q", got, ok, want)
+		}
+	}
+
+	<-done
+}
+
 // peerAnswer is how a peer answers one request: after a delay, with text or, if there is
 // none, by refusing.
 type peerAnswer struct {

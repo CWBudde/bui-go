@@ -60,10 +60,8 @@ type Host struct {
 	clip    string
 	hasClip bool
 
-	// selectionNext is the next paste's property in atoms.selections, and selectionLate
-	// says that a paste timed out, with no answer to a later one since.
+	// selectionNext is the next paste's property in atoms.selections.
 	selectionNext int
-	selectionLate bool
 
 	// wake holds at most one pending wake, so that Wake never blocks.
 	wake     chan struct{}
