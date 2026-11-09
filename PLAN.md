@@ -181,14 +181,10 @@ scope below. Everything stays in the fork until Christian decides to open the up
 - [ ] PR 2 and PR 3 both narrow `host_none.go`'s build constraint. Whichever goes second needs
       `//go:build !linux && !darwin && !bui_cgo`.
 - [ ] Check the review findings on the hosts. All of them are in code moved unchanged from here, so fix them here first, then carry
-      the fixes into the fork, as for [bui-go#17](https://github.com/CWBudde/bui-go/pull/17). None is verified yet.
-  - [ ] X11 ([CWBudde/BUI#2](https://github.com/CWBudde/BUI/pull/2)): a window title longer than the server's maximum request
-        corrupts the connection; a late selection refusal can make the next paste come back empty; a `SelectionRequest` with
-        `Property` set to `None` isn't answered on `Target`; a scanline wider than the maximum request drops the whole damage
-        rectangle; `licenses/x11-keysyms.txt` leaves out `Sunkeysym.h`'s second Open Group notice.
-  - [ ] Cocoa ([CWBudde/BUI#3](https://github.com/CWBudde/BUI/pull/3)): the pump loses the event it dequeues after its budget of
-        256; with a delegate already on `NSApp`, Cmd+Q and the quit Apple Event bypass `terminate()`; entering and leaving full
-        screen don't resize the raster; the backing size is truncated where the C host rounds.
+      the fixes into the fork, as for [bui-go#17](https://github.com/CWBudde/bui-go/pull/17). (2026-11-09) — partial: all nine are
+      real and fixed, with a test each but the licence notice: X11 in [bui-go#19](https://github.com/CWBudde/bui-go/pull/19), Cocoa
+      in [bui-go#20](https://github.com/CWBudde/bui-go/pull/20). The fork's PR 2 and PR 3 carry them. The Cocoa tests passed on the
+      MacBook too. Open: merging both here.
 - [x] Each PR updates `CHANGELOG.md`, `docs/`, the README's bindings table and the website, and lists its known limits.
       (2026-11-08) — all three PRs do, and PR 2 states that question 2 is open. PR 3 states that the check with a second screen
       is open, and that dead keys type the plain character.
