@@ -60,9 +60,6 @@ type Host struct {
 	clip    string
 	hasClip bool
 
-	// selectionNext is the next paste's property in atoms.selections.
-	selectionNext int
-
 	// wake holds at most one pending wake, so that Wake never blocks.
 	wake     chan struct{}
 	wakeFunc func()
@@ -83,9 +80,10 @@ var _ engine.Host = (*Host)(nil)
 type atoms struct {
 	delete, protocols, clipboard, utf8, targets, incr, netWMName xproto.Atom
 
-	// selections are the properties pastes take turns with. The server never frees an
-	// atom, so these are few rather than one per paste.
-	selections [4]xproto.Atom
+	// selections are the properties pastes name. A paste takes one that no request still
+	// waiting for its answer names, and the host interns another when all are taken. The
+	// server never frees an atom, so they are reused rather than one per paste.
+	selections []xproto.Atom
 }
 
 // init quiets xgb's own log, which says "could not get authority info" on every
@@ -217,10 +215,6 @@ func internAtoms(c *xgb.Conn) (atoms, error) {
 		{"UTF8_STRING", &a.utf8},
 		{"TARGETS", &a.targets},
 		{"INCR", &a.incr},
-		{"BUI_SELECTION_0", &a.selections[0]},
-		{"BUI_SELECTION_1", &a.selections[1]},
-		{"BUI_SELECTION_2", &a.selections[2]},
-		{"BUI_SELECTION_3", &a.selections[3]},
 		{"_NET_WM_NAME", &a.netWMName},
 	} {
 		r, err := xproto.InternAtom(c, false, uint16(len(n.name)), n.name).Reply() //nolint:gosec // short constants
@@ -231,7 +225,22 @@ func internAtoms(c *xgb.Conn) (atoms, error) {
 		*n.atom = r.Atom
 	}
 
-	return a, nil
+	selection, err := internSelection(c, 0)
+	a.selections = []xproto.Atom{selection}
+
+	return a, err
+}
+
+// internSelection interns the name of the paste property with index i.
+func internSelection(c *xgb.Conn, i int) (xproto.Atom, error) {
+	name := fmt.Sprintf("BUI_SELECTION_%d", i)
+
+	r, err := xproto.InternAtom(c, false, uint16(len(name)), name).Reply() //nolint:gosec // short names
+	if err != nil {
+		return xproto.AtomNone, fmt.Errorf("InternAtom %s: %w", name, err)
+	}
+
+	return r.Atom, nil
 }
 
 // displayScale is BUI_UI_SCALE, or Xft.dpi as GHOST_SystemX11 reads it, else 1. The C

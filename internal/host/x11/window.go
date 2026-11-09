@@ -59,8 +59,9 @@ type window struct {
 	tipID             int
 	tipDue, customDue time.Time
 
-	// late counts this window's pastes that timed out with no answer seen since.
-	late int
+	// late holds this window's pastes that timed out with no answer seen since, oldest
+	// first.
+	late []lateRequest
 }
 
 var _ engine.WindowHost = (*window)(nil)

@@ -1014,6 +1014,43 @@ func TestClipboardLateRefusalAnswersNoLaterPaste(t *testing.T) {
 	<-done
 }
 
+// After as many timeouts as the host had properties, the late answer to the first request
+// came on the property the next paste had reused, and that paste took it for its own.
+func TestClipboardLateAnswerOnAReusedProperty(t *testing.T) {
+	f := newFixture(t, "text", 300, 40)
+	f.show()
+
+	peer, err := xgb.NewConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+
+	const timeouts = 4
+
+	// The first answer comes while paste timeouts+1 waits, and the rest right after it.
+	answers := make([]peerAnswer, 0, timeouts+1)
+	answers = append(answers, peerAnswer{delay: timeouts*clipboardTimeout + 100*time.Millisecond, text: "alt"})
+
+	for range timeouts - 1 {
+		answers = append(answers, peerAnswer{text: "alt"})
+	}
+
+	done := peerAnswers(t, f, peer, append(answers, peerAnswer{text: "neu"}))
+
+	for i := range timeouts {
+		if got, ok := f.w.ClipboardGet(); ok {
+			t.Errorf("paste %d got %q before the owner answered", i+1, got)
+		}
+	}
+
+	if got, ok := f.w.ClipboardGet(); !ok || got != "neu" {
+		t.Errorf("got %q, %v, want the answer to this paste, \"neu\"", got, ok)
+	}
+
+	<-done
+}
+
 // peerAnswer is how a peer answers one request: after a delay, with text or, if there is
 // none, by refusing.
 type peerAnswer struct {

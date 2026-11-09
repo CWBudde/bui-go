@@ -4,6 +4,7 @@ package x11
 
 import (
 	"bytes"
+	"slices"
 	"time"
 
 	"github.com/jezek/xgb"
@@ -31,20 +32,33 @@ func (win *window) ClipboardGet() (string, bool) {
 	return win.paste()
 }
 
-// paste asks the clipboard's owner for its text. Each request names its own property, so
-// that an owner answering after the timeout cannot answer this one. A refusal names no
-// property, so win.late counts the requests that timed out with no answer seen since. An
-// owner answers in order, so while one is outstanding, the next answer that is not ours,
-// refusal or not, is the oldest late one, and the wait goes on. Late answers leave the
-// queue as they come, so none stays for a later paste to take as its own.
+// lateHorizon is how long a paste that timed out still waits for its answer. Owners answer
+// within milliseconds or never, and the horizon bounds the properties the host interns.
+const lateHorizon = 5 * time.Second
+
+// lateRequest is a paste that timed out: the property it named and when it asked.
+type lateRequest struct {
+	property xproto.Atom
+	asked    time.Time
+}
+
+// paste asks the clipboard's owner for its text. An owner answers in order, and an answer
+// names the request's property, or none for a refusal. So each paste names a property that
+// no request in win.late names, and an answer naming one of those is late text. A refusal
+// while win.late holds requests is the oldest one's. The host interns another property
+// when all are taken, and drops requests past lateHorizon.
 func (win *window) paste() (string, bool) {
 	h := win.host
-	property := h.atoms.selections[h.selectionNext]
-	h.selectionNext = (h.selectionNext + 1) % len(h.atoms.selections)
+	now := time.Now()
+
+	property, ok := win.freeProperty(now)
+	if !ok {
+		return "", false
+	}
 
 	xproto.ConvertSelection(h.c, win.xid, h.atoms.clipboard, h.atoms.utf8, property, xproto.TimeCurrentTime)
 
-	deadline := time.Now().Add(clipboardTimeout)
+	deadline := now.Add(clipboardTimeout)
 
 	for {
 		ev := h.events.waitFor(time.Until(deadline), func(ev xgb.Event) bool {
@@ -54,23 +68,65 @@ func (win *window) paste() (string, bool) {
 		})
 
 		sn, ok := ev.(xproto.SelectionNotifyEvent)
-
-		switch {
-		case !ok:
-			win.late++
+		if !ok {
+			win.late = append(win.late, lateRequest{property: property, asked: now})
 
 			return "", false
+		}
+
+		switch {
 		case sn.Property == property:
 			// Every earlier answer came before this one.
-			win.late = 0
+			win.late = nil
 
 			return win.readSelection(property)
-		case win.late > 0:
-			win.late--
+		case win.takeLate(sn.Property):
 		case sn.Property == xproto.AtomNone:
 			return "", false
 		}
 	}
+}
+
+// takeLate says whether an answer naming property is a late request's, and takes that
+// request out of win.late with every one before it, as those were answered first.
+func (win *window) takeLate(property xproto.Atom) bool {
+	i := 0
+	if property != xproto.AtomNone {
+		i = slices.IndexFunc(win.late, func(r lateRequest) bool { return r.property == property })
+	}
+
+	if i < 0 || i >= len(win.late) {
+		return false
+	}
+
+	win.late = win.late[i+1:]
+
+	return true
+}
+
+// freeProperty drops the requests in win.late past lateHorizon, then finds a paste property
+// that none of the rest names, and interns a new one when all are taken.
+func (win *window) freeProperty(now time.Time) (xproto.Atom, bool) {
+	h := win.host
+
+	for len(win.late) > 0 && now.Sub(win.late[0].asked) > lateHorizon {
+		win.late = win.late[1:]
+	}
+
+	for _, p := range h.atoms.selections {
+		if !slices.ContainsFunc(win.late, func(r lateRequest) bool { return r.property == p }) {
+			return p, true
+		}
+	}
+
+	p, err := internSelection(h.c, len(h.atoms.selections))
+	if err != nil {
+		return xproto.AtomNone, false
+	}
+
+	h.atoms.selections = append(h.atoms.selections, p)
+
+	return p, true
 }
 
 // readSelection takes the text the clipboard's owner stored on this window. It refuses text
