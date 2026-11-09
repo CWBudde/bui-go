@@ -218,3 +218,22 @@ func TestEachWindowKeepsItsScale(t *testing.T) {
 		}
 	})
 }
+
+// The size in pixels rounds, as the C host's lround does: a size in points that is a fraction
+// of a pixel short of a whole one keeps that pixel, and a half rounds up.
+func TestBackingPixelsRound(t *testing.T) {
+	for _, c := range []struct {
+		points nsSize
+		px     float64
+		w, h   int
+	}{
+		{nsSize{320, 240}, 2, 640, 480},
+		{nsSize{33.33333333333333, 100.0 / 3}, 3, 100, 100}, // 99.99999999999999 and 100
+		{nsSize{100.5, 40.25}, 1, 101, 40},
+		{nsSize{199.99999999999997, 0}, 1, 200, 0},
+	} {
+		if w, h := backingPixels(c.points, c.px); w != c.w || h != c.h {
+			t.Errorf("%v at %v: %dx%d, want %dx%d", c.points, c.px, w, h, c.w, c.h)
+		}
+	}
+}

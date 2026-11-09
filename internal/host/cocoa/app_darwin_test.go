@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,22 +19,15 @@ import (
 )
 
 var (
-	selItemArray       = objc.RegisterName("itemArray")
-	selCount           = objc.RegisterName("count")
-	selObjectAtIndex   = objc.RegisterName("objectAtIndex:")
-	selSubmenu         = objc.RegisterName("submenu")
-	selTitle           = objc.RegisterName("title")
-	selAction          = objc.RegisterName("action")
-	selKeyEquivalent   = objc.RegisterName("keyEquivalent")
-	selKeyEquivMask    = objc.RegisterName("keyEquivalentModifierMask")
-	selIsSeparator     = objc.RegisterName("isSeparatorItem")
-	selWindowsMenu     = objc.RegisterName("windowsMenu")
-	selTerminate       = objc.RegisterName("terminate:")
-	selProcessDesc     = objc.RegisterName("currentProcessDescriptor")
-	selAppleEventWith  = objc.RegisterName("appleEventWithEventClass:eventID:targetDescriptor:returnID:transactionID:")
-	selAEDesc          = objc.RegisterName("aeDesc")
-	selSharedAEManager = objc.RegisterName("sharedAppleEventManager")
-	selDispatchRawAE   = objc.RegisterName("dispatchRawAppleEvent:withRawReply:handlerRefCon:")
+	selTitle          = objc.RegisterName("title")
+	selKeyEquivalent  = objc.RegisterName("keyEquivalent")
+	selKeyEquivMask   = objc.RegisterName("keyEquivalentModifierMask")
+	selIsSeparator    = objc.RegisterName("isSeparatorItem")
+	selWindowsMenu    = objc.RegisterName("windowsMenu")
+	selProcessDesc    = objc.RegisterName("currentProcessDescriptor")
+	selAppleEventWith = objc.RegisterName("appleEventWithEventClass:eventID:targetDescriptor:returnID:transactionID:")
+	selAEDesc         = objc.RegisterName("aeDesc")
+	selDispatchRawAE  = objc.RegisterName("dispatchRawAppleEvent:withRawReply:handlerRefCon:")
 )
 
 // quitDone is what a child prints once the loop has ended and the windows are closed, so
@@ -183,10 +177,15 @@ func (f *inputFixture) runUntilClosed(act func()) bool {
 // Quitting the application, by Cmd+Q, by terminate: as the Dock and the menu send it, or by
 // the Apple Event that logging out sends, closes every window and ends Run. AppKit's own
 // answer would end the process, so each runs in a child.
+//
+// The foreign- cases make NSApp first, with a delegate that lets AppKit end the process, as a
+// process embedding the host might. The menu's Quit and the Apple Event still come to the
+// host, as the C host's route_quit has them. A terminate: sent to NSApp itself is that
+// delegate's to answer, in the C host too, so it has no foreign case.
 func TestQuitClosesEveryWindow(t *testing.T) {
 	requireDisplay(t)
 
-	for _, how := range []string{"cmd-q", "terminate", "apple-event"} {
+	for _, how := range []string{"cmd-q", "terminate", "apple-event", "foreign-cmd-q", "foreign-apple-event"} {
 		t.Run(how, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], "-test.run=^TestChildProcess$", "-test.count=1", "-test.v")
 
@@ -205,6 +204,12 @@ func quitChild(t *testing.T, how string) {
 	t.Helper()
 
 	onMain(func() {
+		if rest, ok := strings.CutPrefix(how, "quit-foreign-"); ok {
+			makeForeignApp()
+
+			how = "quit-" + rest
+		}
+
 		f := openInput(t, "button", 100, 40)
 		other := newFixture()
 
@@ -239,6 +244,15 @@ func quitChild(t *testing.T, how string) {
 	}
 }
 
+// makeForeignApp makes NSApp before the host does, with a delegate that answers nothing, so
+// that AppKit ends the process on a quit that reaches it.
+func makeForeignApp() {
+	load()
+
+	app := clsNSApplication.Send(selSharedApplication)
+	app.Send(selSetDelegate, objc.ID(objc.GetClass("NSObject")).Send(selAlloc).Send(selInit))
+}
+
 // dispatchQuitEvent hands the process the Apple Event that the Dock's Quit and logging out
 // send. It goes to the registered handler directly, so no other process is involved.
 func dispatchQuitEvent(t *testing.T) {
@@ -257,7 +271,7 @@ func dispatchQuitEvent(t *testing.T) {
 	var reply [2]uintptr
 
 	desc := objc.Send[unsafe.Pointer](ev, selAEDesc)
-	manager := objc.ID(objc.GetClass("NSAppleEventManager")).Send(selSharedAEManager)
+	manager := objc.ID(objc.GetClass("NSAppleEventManager")).Send(selEventManager)
 
 	if err := objc.Send[int16](manager, selDispatchRawAE, desc, unsafe.Pointer(&reply[0]), uintptr(0)); err != 0 {
 		t.Errorf("dispatching the quit event: OSErr %d", err)

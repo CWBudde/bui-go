@@ -3,6 +3,7 @@
 package cocoa
 
 import (
+	"math"
 	"os"
 	"strconv"
 	"time"
@@ -126,6 +127,8 @@ func registerDelegate() bool {
 			}
 		})
 	}
+	// Full screen comes here too: AppKit may send no resize when switching between a zoomed
+	// window and full screen, as the C host notes.
 	onResize := func(_ objc.ID, _ objc.SEL, note objc.ID) {
 		guarded(func() {
 			if win := current.findNS(note.Send(selObject)); win != nil {
@@ -154,6 +157,8 @@ func registerDelegate() bool {
 	cls, err := objc.RegisterClass("BUIGoWindowDelegate", objc.GetClass("NSObject"), nil, nil, []objc.MethodDef{
 		{Cmd: objc.RegisterName("windowWillClose:"), Fn: onClose},
 		{Cmd: objc.RegisterName("windowDidResize:"), Fn: onResize},
+		{Cmd: objc.RegisterName("windowDidEnterFullScreen:"), Fn: onResize},
+		{Cmd: objc.RegisterName("windowDidExitFullScreen:"), Fn: onResize},
 		{Cmd: objc.RegisterName("windowDidChangeBackingProperties:"), Fn: onBacking},
 		{Cmd: objc.RegisterName("windowDidBecomeKey:"), Fn: onBecomeKey},
 	})
@@ -325,11 +330,17 @@ func (win *window) resized() {
 func (win *window) syncSize() {
 	b := objc.Send[nsRect](win.nswin.Send(selContentView), selBounds)
 
-	w, h := int(b.Size.W*win.px), int(b.Size.H*win.px)
+	w, h := backingPixels(b.Size, win.px)
 	if w != win.w || h != win.h {
 		win.w, win.h = w, h
 		win.renderPending = true
 	}
+}
+
+// backingPixels is a size in points in whole pixels at px pixels per point. It rounds, as the
+// C host's lround does, so that a product a hair under a whole pixel keeps that pixel.
+func backingPixels(points nsSize, px float64) (w, h int) {
+	return int(math.Round(points.W * px)), int(math.Round(points.H * px))
 }
 
 func (h *Host) find(id engine.Window) *window {

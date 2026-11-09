@@ -4,8 +4,10 @@ package cocoa
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -642,6 +644,101 @@ func TestResizeReachesTheRaster(t *testing.T) {
 
 		if got := layerPixels(t, win); len(got) != win.rasterW*win.rasterH*pixelSize {
 			t.Errorf("%d bytes from the layer", len(got))
+		}
+	})
+}
+
+// Switching between a zoomed window and full screen may send no resize, so entering and
+// leaving full screen read the size, as in the C host. The test makes the host's size stale
+// and sends each notification to the delegate.
+func TestFullScreenRereadsTheSize(t *testing.T) {
+	requireDisplay(t)
+
+	onMain(func() {
+		f := newFixture()
+		defer f.free()
+
+		id := f.h.WindowNew(f.ctx, "bui cocoa test", 200, 100)
+		defer f.h.WindowFree(id)
+
+		win := f.h.find(id)
+		win.render()
+
+		pool := poolPush()
+		defer poolPop(pool)
+
+		delegate := win.nswin.Send(selDelegate)
+		w, h := win.w, win.h
+
+		for _, name := range []string{"windowDidEnterFullScreen:", "windowDidExitFullScreen:"} {
+			sel := objc.RegisterName(name)
+			if !objc.Send[bool](delegate, objc.RegisterName("respondsToSelector:"), sel) {
+				t.Errorf("the window delegate has no %s", name)
+
+				continue
+			}
+
+			win.w, win.h, win.renderPending = 1, 1, false
+
+			note := objc.ID(objc.GetClass("NSNotification")).Send(selNotification, nsString("bui-go test"), win.nswin)
+			delegate.Send(sel, note)
+
+			if win.w != w || win.h != h || !win.renderPending {
+				t.Errorf("%s: size %dx%d, render pending %v, want %dx%d and true", name, win.w, win.h,
+					win.renderPending, w, h)
+			}
+		}
+	})
+}
+
+// A burst longer than a turn's budget loses no event: what one turn leaves, the next takes.
+// A lost release would leave the button held. The release comes right after the budget.
+func TestEventsPastTheBudgetAreKept(t *testing.T) {
+	requireDisplay(t)
+
+	onMain(func() {
+		f := openInput(t, "button", 200, 80)
+		defer f.close()
+
+		spy := &buttonSpy{Kit: f.h.kit}
+		f.h.kit = spy
+
+		defer func() { f.h.kit = spy.Kit }()
+
+		pool := poolPush()
+		defer poolPop(pool)
+
+		// Nothing else may be queued ahead of the burst, or it would shift the release.
+		for range 100 {
+			if f.h.app.Send(selNextEvent, eventMaskAny, objc.ID(0), nsDefaultRunLoopMode, false) == 0 {
+				break
+			}
+
+			f.h.pump(objc.ID(0))
+		}
+
+		// Filler: application-defined events that aren't the wake's, which AppKit passes over.
+		for range maxEventsPerTurn - 1 {
+			filler := clsNSEvent.Send(selOtherEvent, uint64(eventTypeAppDefined), nsPoint{}, uint64(0), float64(0),
+				int64(0), objc.ID(0), int16(0), int64(0), int64(0))
+			f.h.app.Send(selPostEvent, filler, false)
+		}
+
+		x, y := f.center()
+		window := objc.Send[int64](f.win.nswin, selWindowNumber)
+
+		for _, kind := range []uint64{eventLeftDown, eventLeftUp} {
+			ev := clsNSEvent.Send(selMouseEvent, kind, f.windowPoint(x, y), uint64(0), f.now(), window, objc.ID(0),
+				int64(0), int64(1), float32(1))
+			f.h.app.Send(selPostEvent, ev, false)
+		}
+
+		f.h.pump(objc.ID(0))
+		f.h.pump(objc.ID(0))
+
+		want := []string{fmt.Sprintf("press %d", engine.ModButton1), "release 0"}
+		if !slices.Equal(spy.calls, want) {
+			t.Errorf("calls %q, want %q", spy.calls, want)
 		}
 	})
 }
