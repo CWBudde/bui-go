@@ -18,11 +18,12 @@ type context struct {
 
 // newContext attaches a context to root. The host goes in first: BK_window_new
 // saves the host it finds and forwards only emit.
+//
+// Contexts don't nest. The kit finds a node's context by walking up to the
+// nearest root, so a context around another one never hears that a node inside
+// the inner one went away, and keeps pointing at it.
 func newContext(root *Node) *context {
-	c := root.live()
-	if root.owner != nil {
-		panic("bui: node is already the root of a Window or Headless")
-	}
+	c := checkRoot(root)
 
 	handle := kit.ContextNew(c)
 	if handle == 0 {
@@ -34,6 +35,21 @@ func newContext(root *Node) *context {
 	root.owner = ctx
 
 	return ctx
+}
+
+// checkRoot panics unless root can take a context: it is live, not a root yet,
+// and no live context holds an ancestor or a descendant of it.
+func checkRoot(root *Node) engine.Node {
+	c := root.live()
+	if root.owner != nil {
+		panic("bui: node is already the root of a Window or Headless")
+	}
+
+	if liveRootAbove(c) != nil || liveRootIn(c) != nil {
+		panic("bui: a Window or Headless already holds an ancestor or a descendant of this node")
+	}
+
+	return c
 }
 
 // free destroys the context but not the root.
@@ -58,7 +74,8 @@ type Headless struct {
 const maxHeadlessPixels = 1 << 26
 
 // NewHeadless creates a context on root with a w x h raster. Close it before
-// closing root. It panics on a size that is not positive or is too large for a raster.
+// closing root. It panics on a size that is not positive or is too large for a raster,
+// and if a live Window or Headless holds root, an ancestor or a descendant of it.
 func NewHeadless(root *Node, w, h int) *Headless {
 	if w <= 0 || h <= 0 || w > maxHeadlessPixels/h {
 		panic(fmt.Sprintf("bui: Headless size %d x %d is out of range", w, h))

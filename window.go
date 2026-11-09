@@ -11,9 +11,10 @@ type Window struct {
 }
 
 // NewWindow creates a window on root, hidden until Show. The error is
-// ErrNoDisplay without a window system.
+// ErrNoDisplay without a window system. Like NewHeadless, it panics if a live
+// Window or Headless holds root, an ancestor or a descendant of it.
 func NewWindow(root *Node, title string, w, h int) (*Window, error) {
-	root.live()
+	checkRoot(root) // also without a window system, so the rules don't depend on one
 
 	if !Supported() {
 		return nil, ErrNoDisplay

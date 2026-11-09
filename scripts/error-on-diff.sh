@@ -10,7 +10,7 @@ trap 'rm -rf "$TMP"' EXIT
 git checkout-index --all --prefix "$TMP/"
 cd "$TMP"
 
-# Initializie as git repo to enable diff
+# Initialize as git repo to enable diff
 git init . 2>/dev/null
 git add . 2>/dev/null
 
