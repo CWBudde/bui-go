@@ -274,14 +274,23 @@ func (win *window) present(all bool) {
 	}
 }
 
-// putRect sends a rectangle in as many requests as the server's limit asks for.
+// putRect sends a rectangle in as many requests as the server's limit asks for. A server
+// may take requests as short as 16 KiB, so a row that does not fit one goes in columns.
 func (h *Host) putRect(win *window, pixels []byte, d engine.Rect) {
 	const pixelSize = 4
 
 	stride := pixelSize * win.rasterW
 	row := pixelSize * d.W
 
-	if row <= 0 || d.H <= 0 || row > h.maxData {
+	if row <= 0 || d.H <= 0 {
+		return
+	}
+
+	if cols := h.maxData / pixelSize; d.W > cols {
+		for x := d.X; x < d.X+d.W; x += cols {
+			h.putRect(win, pixels, engine.Rect{X: x, Y: d.Y, W: min(cols, d.X+d.W-x), H: d.H})
+		}
+
 		return
 	}
 

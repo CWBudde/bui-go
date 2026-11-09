@@ -381,6 +381,21 @@ func TestPresentSplitsLargeFrames(t *testing.T) {
 	f.checkPresented("a large frame")
 }
 
+// A server may take requests as short as 16 KiB, shorter than a row of a wide window.
+// Such rows go out in columns. This one takes 64 pixels a request.
+func TestPresentSplitsWideRows(t *testing.T) {
+	f := newFixture(t, "button", 300, 100)
+	f.k.SetStr(f.child, "text", "Hover me")
+	f.h.maxData = 4 * 64
+	f.show()
+
+	f.checkPresented("the first frame")
+
+	x, y := f.center()
+	f.motion(x, y, 0)
+	f.checkPresented("the hovered frame")
+}
+
 func TestExposeRedrawsTheWholeWindow(t *testing.T) {
 	f := newFixture(t, "button", 200, 80)
 	f.show()
