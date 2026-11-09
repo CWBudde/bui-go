@@ -19,6 +19,13 @@ Open work for bui-go, as of 2026-11-08. Finished work belongs in `docs/design.md
   during live resize.
 - [bui-go#14](https://github.com/CWBudde/bui-go/pull/14) is merged, so `main`'s Cocoa host follows scale changes between screens.
 - [bui-go#15](https://github.com/CWBudde/bui-go/pull/15) is merged, so `main` states its licence as BUI does.
+- [bui-go#16](https://github.com/CWBudde/bui-go/pull/16) is merged, so `main` pins BUI `v0.5.0` and the cgo engine opens X11
+  windows unless `BUI_WINDOW_BACKEND` says otherwise.
+- [bui-go#17](https://github.com/CWBudde/bui-go/pull/17) is merged, so `main` refuses nested Window and Headless contexts, a bug
+  review found in the fork's PR 1.
+- The three Phase 3 PRs are open in the fork, not upstream: [CWBudde/BUI#1](https://github.com/CWBudde/BUI/pull/1),
+  [CWBudde/BUI#2](https://github.com/CWBudde/BUI/pull/2) and [CWBudde/BUI#3](https://github.com/CWBudde/BUI/pull/3). CI is green on
+  all three.
 - BUI tagged `v0.5.0` on 2026-11-08, 112 commits past `v0.4.1` (see Phase 0).
 - A trial bump to BUI `bca7b8d` worked: the wasm built unmodified, reproduced byte for byte, and passed without cgo with the golden
   hashes unchanged. With cgo, only `TestNoDisplay` failed (see Phase 0).
@@ -150,19 +157,44 @@ The window draws correctly, and Christian counted 1.6x as close on 2026-11-07, a
 Started on 2026-11-08 before the owner answered our four questions on BUI#8, as Christian chose. Their answers can still change the
 scope below. Everything stays in the fork until Christian decides to open the upstream PRs.
 
-- [ ] Fork to `CWBudde/BUI`. Push over HTTPS with the `CWBudde` `gh` token, or load the key for the `github.com-cwbudde` SSH alias,
-      which the agent doesn't hold at the moment. Check the commit email first.
-- [ ] Move the module to `bindings/go`, under the path `github.com/ppmpreetham/BUI/bindings/go`, in fresh commits that link back here.
-- [ ] Leave out `lib/linux_amd64/*.a` and make the cgo engine opt-in, using libraries built with CMake.
-- [ ] Build `sjlj_probe.wasm` in the test step instead of committing it.
-- [ ] Merge `NOTICES.md` and `licenses/` into `THIRD_PARTY_NOTICES.md` where they overlap, and keep the gaps marked.
-- [ ] Add a Go CI job limited to `bindings/go/**`.
-- [ ] PR 1: wasm engine, public API, `Headless`, enginetest.
-- [ ] PR 2: X11 host, if question 2 gets a yes.
-- [ ] PR 3: Cocoa host, if Phase 2 passes.
-- [ ] Each PR updates `CHANGELOG.md`, `docs/`, the README's bindings table and the website, and lists its known limits.
-- [ ] Before each PR, fetch the module from a scratch module at `github.com/CWBudde/BUI/bindings/go@<sha>` to prove it works outside
-      the repo, and confirm BUI's `cmake`, `rust` and `package` jobs are unaffected.
+- [x] Fork to `CWBudde/BUI`. (2026-11-08) — the fork has Actions on and a clone at `/mnt/projekte/Code/BUI`. Its `origin` uses the
+      `github.com-cwbudde` SSH alias, as plain `github.com` signs in as MeKo-Christian, which has no access. Commits are by
+      `Christian Budde <Christian.Budde@meko.de>`.
+- [x] Move the module to `bindings/go`, under the path `github.com/ppmpreetham/BUI/bindings/go`, in fresh commits that link back here.
+      (2026-11-08) — in [CWBudde/BUI#1](https://github.com/CWBudde/BUI/pull/1), from `d21272d`. `host_none.go` is the only host
+      there; the hosts come with PR 2 and PR 3.
+- [x] Leave out `lib/linux_amd64/*.a` and make the cgo engine opt-in, using libraries built with CMake. (2026-11-08) — the tag
+      `bui_cgo` links `build/{kit,gpu,core}` from BUI's own CMake build at the repository's root. `go test -tags bui_cgo ./...`
+      passes against the fork's tree, the comparison of both engines' pixels included.
+- [x] Build `sjlj_probe.wasm` in the test step instead of committing it. (2026-11-08) — `TestSjljFreeTypeOverflow` builds it with
+      `build-wasm.sh probe` and skips with a message without the pinned wasi-sdk. CI fetches the SDK first.
+- [x] Merge `NOTICES.md` and `licenses/` into `THIRD_PARTY_NOTICES.md` where they overlap, and keep the gaps marked. (2026-11-08) —
+      `tools/gen_notices.py` renders a section "The Go binding", and `gen_notices.py --check` passes. PR 2 and PR 3 add xgb, the
+      X11 keysym tables and purego.
+- [x] Add a Go CI job limited to `bindings/go/**`. (2026-11-08) — `.github/workflows/go.yml`: formatting, lint, tests without cgo
+      on Linux and macOS, and `check-wasm`. PR 2 adds the X11 runs, and PR 3 the Cocoa tests on macOS.
+- [ ] PR 1: wasm engine, public API, `Headless`, enginetest. Prepared as [CWBudde/BUI#1](https://github.com/CWBudde/BUI/pull/1).
+      It carries [bui-go#17](https://github.com/CWBudde/bui-go/pull/17) as well.
+- [ ] PR 2: X11 host, if question 2 gets a yes. Prepared as [CWBudde/BUI#2](https://github.com/CWBudde/BUI/pull/2), stacked on PR 1.
+- [ ] PR 3: Cocoa host, if Phase 2 passes. Prepared as [CWBudde/BUI#3](https://github.com/CWBudde/BUI/pull/3), stacked on PR 1. Its
+      tests ran only in the fork's macOS CI job.
+- [ ] PR 2 and PR 3 both narrow `host_none.go`'s build constraint. Whichever goes second needs
+      `//go:build !linux && !darwin && !bui_cgo`.
+- [ ] Check the review findings on the hosts. All of them are in code moved unchanged from here, so fix them here first, then carry
+      the fixes into the fork, as for [bui-go#17](https://github.com/CWBudde/bui-go/pull/17). (2026-11-09) — partial: all nine are
+      real and fixed, with a test each but the licence notice: X11 in [bui-go#19](https://github.com/CWBudde/bui-go/pull/19), Cocoa
+      in [bui-go#20](https://github.com/CWBudde/bui-go/pull/20). The fork's PR 2 and PR 3 carry them. The Cocoa tests passed on the
+      MacBook too. Open: merging both here.
+- [x] Each PR updates `CHANGELOG.md`, `docs/`, the README's bindings table and the website, and lists its known limits.
+      (2026-11-08) — all three PRs do, and PR 2 states that question 2 is open. PR 3 states that the check with a second screen
+      is open, and that dead keys type the plain character.
+- [ ] Before each PR, prove the module works outside the repo: a scratch module requires `github.com/ppmpreetham/BUI/bindings/go`
+      and replaces it with `github.com/CWBudde/BUI/bindings/go <sha>`, as the module declares the upstream path. Confirm BUI's
+      `cmake`, `rust` and `package` jobs are unaffected too. (2026-11-08) — partial: with that `replace`, the Go proxy fetched PR
+      1's module at `d4bb297`, and its README example ran with `CGO_ENABLED=0`. BUI's jobs are green on all three.
+      PR 2 and PR 3 still need the scratch module, and all three need it again on the commit that goes upstream.
+- [ ] Open the upstream PRs on `ppmpreetham/BUI`. Christian decides when, after the answer on BUI#8. Rebase onto upstream's `main`
+      first: the fork stays at `e8126ca`.
 - [ ] After the merge, archive bui-go with a pointer to `bindings/go`, or keep it as a mirror. Christian decides.
 
 ## Not planned yet
