@@ -1,6 +1,6 @@
 # Plan
 
-Open work for bui-go, as of 2026-11-08. Finished work belongs in `docs/design.md` and the git history, not here.
+Open work for bui-go, as of 2026-11-10. Finished work belongs in `docs/design.md` and the git history, not here.
 
 ## Where we stand
 
@@ -8,7 +8,8 @@ Open work for bui-go, as of 2026-11-08. Finished work belongs in `docs/design.md
 - [bui-go#8](https://github.com/CWBudde/bui-go/pull/8) is merged, so `main` pins BUI `v0.4.1`.
 - BUI's owner wants the binding in-tree at `bindings/go`. We asked four questions on
   [BUI#8](https://github.com/ppmpreetham/BUI/issues/8#issuecomment-6707514269), about the committed wasm, the second X11 host,
-  pinning and tags. There is no answer yet. Christian started Phase 3 anyway on 2026-11-08, in the fork only.
+  pinning and tags. Christian started Phase 3 on 2026-11-08, in the fork only. The owner
+  [answered](https://github.com/ppmpreetham/BUI/issues/8) on 2026-11-09, and nobody has replied yet: see Phase 3.
 - [bui-go#9](https://github.com/CWBudde/bui-go/pull/9) is merged, so `main` has the macOS baseline.
 - [bui-go#10](https://github.com/CWBudde/bui-go/pull/10) is merged, so `main` has the Cocoa spike. Christian counted its 1.6x as
   close and lifted the hold on the port, so the port goes ahead before the owner answers.
@@ -23,9 +24,12 @@ Open work for bui-go, as of 2026-11-08. Finished work belongs in `docs/design.md
   windows unless `BUI_WINDOW_BACKEND` says otherwise.
 - [bui-go#17](https://github.com/CWBudde/bui-go/pull/17) is merged, so `main` refuses nested Window and Headless contexts, a bug
   review found in the fork's PR 1.
-- The three Phase 3 PRs are open in the fork, not upstream: [CWBudde/BUI#1](https://github.com/CWBudde/BUI/pull/1),
-  [CWBudde/BUI#2](https://github.com/CWBudde/BUI/pull/2) and [CWBudde/BUI#3](https://github.com/CWBudde/BUI/pull/3). CI is green on
-  all three.
+- [bui-go#18](https://github.com/CWBudde/bui-go/pull/18), [bui-go#19](https://github.com/CWBudde/bui-go/pull/19) and
+  [bui-go#20](https://github.com/CWBudde/bui-go/pull/20) are merged, so `main` has the fixes for the review findings on the hosts.
+- The three Phase 3 PRs are merged into the fork's `main` (`9fdcceb`), not upstream:
+  [CWBudde/BUI#1](https://github.com/CWBudde/BUI/pull/1), [CWBudde/BUI#4](https://github.com/CWBudde/BUI/pull/4) (the X11 host,
+  which [CWBudde/BUI#2](https://github.com/CWBudde/BUI/pull/2) had merged into PR 1's branch) and
+  [CWBudde/BUI#3](https://github.com/CWBudde/BUI/pull/3).
 - BUI tagged `v0.5.0` on 2026-11-08, 112 commits past `v0.4.1` (see Phase 0).
 - A trial bump to BUI `bca7b8d` worked: the wasm built unmodified, reproduced byte for byte, and passed without cgo with the golden
   hashes unchanged. With cgo, only `TestNoDisplay` failed (see Phase 0).
@@ -52,8 +56,9 @@ None of this depends on the owner's answer.
       Christian chose: GPL-3.0-or-later as a whole, with its files' `GPL-2.0-or-later` headers unchanged. The README, "Licensing" and
       `NOTICES.md` say so, and the wasm engine's GPLv3 now follows from the whole rather than from "or later".
 - [ ] Hover and drag with a real pointer on a real X session. So far these have only been driven on Xvfb.
-- [ ] Decide on wasm containment: a trap or out-of-memory ends the process. Recommendation: keep that behaviour, and file an issue
-      for an opt-in fatal hook.
+- [ ] Wasm containment: a trap or out-of-memory ends the process. The owner asks for a way to catch it (Phase 3), so this is no
+      longer "keep it and file an issue". A module that trapped is in an unknown state, so catching means at least reporting the
+      error and refusing further kit calls. Christian decides the API: an error from `Run`, a hook, or both.
 - [x] Make the load in `scripts/bench.sh` independent of the locale: on the German MacBook `sysctl` gives `7,05`. Set `LC_ALL=C`.
       (2026-11-08) — `LC_ALL=C` on the `sysctl` call alone. On the MacBook under `de_DE.UTF-8`, the old `load()` printed
       `1,47 2,14 2,30` and the new one `1.47 2.14 2.30`. The header of `bench/2026-11-07-a06371a.txt` now uses dots too.
@@ -157,8 +162,9 @@ The window draws correctly, and Christian counted 1.6x as close on 2026-11-07, a
 
 ## Phase 3: Upstream as `bindings/go`
 
-Started on 2026-11-08 before the owner answered our four questions on BUI#8, as Christian chose. Their answers can still change the
-scope below. Everything stays in the fork until Christian decides to open the upstream PRs.
+Started on 2026-11-08 before the owner answered our four questions on BUI#8, as Christian chose. The owner answered on 2026-11-09,
+and the answer changes the scope: the items from "Reply on BUI#8" down come from it. Everything stays in the fork until Christian
+decides to open the upstream PRs.
 
 - [x] Fork to `CWBudde/BUI`. (2026-11-08) — the fork has Actions on and a clone at `/mnt/projekte/Code/BUI`. Its `origin` uses the
       `github.com-cwbudde` SSH alias, as plain `github.com` signs in as MeKo-Christian, which has no access. Commits are by
@@ -176,18 +182,21 @@ scope below. Everything stays in the fork until Christian decides to open the up
       X11 keysym tables and purego.
 - [x] Add a Go CI job limited to `bindings/go/**`. (2026-11-08) — `.github/workflows/go.yml`: formatting, lint, tests without cgo
       on Linux and macOS, and `check-wasm`. PR 2 adds the X11 runs, and PR 3 the Cocoa tests on macOS.
-- [ ] PR 1: wasm engine, public API, `Headless`, enginetest. Prepared as [CWBudde/BUI#1](https://github.com/CWBudde/BUI/pull/1).
-      It carries [bui-go#17](https://github.com/CWBudde/bui-go/pull/17) as well.
-- [ ] PR 2: X11 host, if question 2 gets a yes. Prepared as [CWBudde/BUI#2](https://github.com/CWBudde/BUI/pull/2), stacked on PR 1.
-- [ ] PR 3: Cocoa host, if Phase 2 passes. Prepared as [CWBudde/BUI#3](https://github.com/CWBudde/BUI/pull/3), stacked on PR 1. Its
-      tests ran only in the fork's macOS CI job.
-- [ ] PR 2 and PR 3 both narrow `host_none.go`'s build constraint. Whichever goes second needs
-      `//go:build !linux && !darwin && !bui_cgo`.
-- [ ] Check the review findings on the hosts. All of them are in code moved unchanged from here, so fix them here first, then carry
-      the fixes into the fork, as for [bui-go#17](https://github.com/CWBudde/bui-go/pull/17). (2026-11-09) — partial: all nine are
-      real and fixed, with a test each but the licence notice: X11 in [bui-go#19](https://github.com/CWBudde/bui-go/pull/19), Cocoa
-      in [bui-go#20](https://github.com/CWBudde/bui-go/pull/20). The fork's PR 2 and PR 3 carry them. The Cocoa tests passed on the
-      MacBook too. Open: merging both here.
+- [ ] PR 1: wasm engine, public API, `Headless`, enginetest. Prepared as [CWBudde/BUI#1](https://github.com/CWBudde/BUI/pull/1),
+      merged into the fork's `main`. It carries [bui-go#17](https://github.com/CWBudde/bui-go/pull/17) as well. The owner wants no
+      committed wasm on `main` (see below), so it needs rework before it goes upstream.
+- [ ] PR 2: X11 host. Prepared as [CWBudde/BUI#2](https://github.com/CWBudde/BUI/pull/2) and
+      [CWBudde/BUI#4](https://github.com/CWBudde/BUI/pull/4), merged into the fork's `main`. The owner would rather not have it in the
+      core (see below).
+- [ ] PR 3: Cocoa host. Prepared as [CWBudde/BUI#3](https://github.com/CWBudde/BUI/pull/3), merged into the fork's `main`. Its tests
+      ran only in the fork's macOS CI job. The owner's point on the X11 host applies to it too.
+- [x] PR 2 and PR 3 both narrow `host_none.go`'s build constraint. Whichever goes second needs
+      `//go:build !linux && !darwin && !bui_cgo`. (2026-11-10) — the fork's `main` at `9fdcceb` has exactly that line.
+- [x] Check the review findings on the hosts. All of them are in code moved unchanged from here, so fix them here first, then carry
+      the fixes into the fork, as for [bui-go#17](https://github.com/CWBudde/bui-go/pull/17). (2026-11-10) — all nine are real and
+      fixed, with a test each but the licence notice: X11 in [bui-go#19](https://github.com/CWBudde/bui-go/pull/19) (merged as
+      `ee5371e`), Cocoa in [bui-go#20](https://github.com/CWBudde/bui-go/pull/20) (merged as `415f042`). The fork's `main` carries
+      them.
 - [x] Each PR updates `CHANGELOG.md`, `docs/`, the README's bindings table and the website, and lists its known limits.
       (2026-11-08) — all three PRs do, and PR 2 states that question 2 is open. PR 3 states that the check with a second screen
       is open, and that dead keys type the plain character.
@@ -196,8 +205,32 @@ scope below. Everything stays in the fork until Christian decides to open the up
       `cmake`, `rust` and `package` jobs are unaffected too. (2026-11-08) — partial: with that `replace`, the Go proxy fetched PR
       1's module at `d4bb297`, and its README example ran with `CGO_ENABLED=0`. BUI's jobs are green on all three.
       PR 2 and PR 3 still need the scratch module, and all three need it again on the commit that goes upstream.
-- [ ] Open the upstream PRs on `ppmpreetham/BUI`. Christian decides when, after the answer on BUI#8. Rebase onto upstream's `main`
-      first: the fork stays at `e8126ca`.
+- [ ] Reply on [BUI#8](https://github.com/ppmpreetham/BUI/issues/8). Christian does that. Points the answer can already state: wazero
+      is in `THIRD_PARTY_NOTICES.md` (the fork's `main`, "The Go binding"), and the changelog, docs, README and website are updated.
+      On size: `bui_kit.wasm` grew 2,445 bytes from `v0.4.1` to `v0.5.0` (3,454,663 to 3,457,108). It is 1.33 MB gzipped, an upper
+      bound for what each update adds to the history, as git's delta compression on it is not measured.
+- [ ] Keep the wasm off `main`, as the owner asks: CI builds it from the release tag with the pinned toolchain, and a bot commits it
+      to a separate branch or repository that `go get` can fetch, for example `ppmpreetham/BUI-go`. CI rebuilds it from the pinned
+      commit and fails if its checksum differs from the committed one. Christian decides between a branch and a repository, and how
+      the module path then reads.
+- [ ] A public embedding API, so that a window host can live outside package `bui`: render to a pixel buffer and feed events, as the
+      owner asks. (2026-11-10) — partial: `Headless` now has `Image`, `RenderDamage`, `NeedsRender` and `Resize`, and the kit's
+      input as `PressMods`, `ReleaseMods`, `Motion`, `Wheel`, `Scroll`, `Key` and `ContextMenu`, with `Mod` bits. Open: the host's
+      side, which `engine.WindowHost` has internally: redraw requests, the cursor, warping, the clipboard and timers (`Timer`),
+      plus `Animating`, and how an outside loop drains `Do` and runs deferred frees. The raw-only `KeyRelease` and `Button` reach
+      only "events" nodes, which package `bui` has no handler for yet.
+- [ ] Then the X11 and Cocoa hosts as optional packages on that API, outside the core, or in the repository and clearly marked as
+      the owner allows. Christian decides where they go.
+- [ ] Carry the embedding API into the fork once it is complete, as fresh commits on the fork's `main`.
+- [ ] A release gate, as the owner asks: BUI's release workflow rebuilds the wasm from the release tag and runs the Go tests, and
+      `tools/check_versions.py` checks the kit version that `bindings/go` pins.
+- [ ] Tags `bindings/go/vX.Y.Z` with the number of the BUI release, made by `tools/release.py` rather than by hand.
+- [ ] Startup time, frame time and memory against the native kit, in the form of the other bindings on the website's benchmarks
+      page. `scripts/bench.sh` and `bench/` have frame times already.
+- [ ] Generate the API from `BUI_kit.h` instead of writing it by hand, as the owner asks, so it can't drift from the kit. This
+      touches the seam (`internal/engine`), both engines and `wasm/shim.c`. Christian decides the scope.
+- [ ] Open the upstream PRs on `ppmpreetham/BUI`. Christian decides when, after the reply on BUI#8. Rebase onto upstream's `main`
+      first: the fork's work sits on `e8126ca`, one commit behind upstream on 2026-11-10.
 - [ ] After the merge, archive bui-go with a pointer to `bindings/go`, or keep it as a mirror. Christian decides.
 
 ## Not planned yet
