@@ -49,6 +49,12 @@ func main() {
 }
 ```
 
+`Headless` takes the kit's whole input: `PressMods`, `ReleaseMods`, `Motion` (pass `ModButton1` to drag), `Wheel`,
+`Scroll`, `Key` with an X keysym name and the typed text, and `ContextMenu`. Coordinates are raster pixels. `Image` returns
+the last render as an `*image.RGBA`, `RenderDamage` the rectangles whose pixels changed, and `Resize` sets the next render's
+size. So a program can show the raster in a window of its own and forward that window's events. The cursor, the clipboard
+and timers need a window host, which `Headless` doesn't have: those requests go nowhere.
+
 CI runs the tests on macOS, including the Cocoa host's tests, which open real windows, but only cross-builds for Windows, so that platform is
 untested.
 
