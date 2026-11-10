@@ -98,7 +98,8 @@ that time. The module loads at the first kit call, so importing the package cost
 - No GPU window, video or file browser, and no worker threads. Image sources would stay pending forever, though the API sets
   none today.
 - Only the embedded Inter font works by default.
-- Core X cursors, not the desktop's theme, and no Compose or IME input. A dead key types its own character.
+- Core X cursors, not the desktop's theme, and no Compose or IME input. A dead key types its own character on X11. On macOS it
+  types nothing, and the next key its plain character (´ then e types "e"), as in BUI's C host.
 - Clipboard text that takes X's INCR transfer, past about 256 KiB, is refused in both directions.
 - `EvalNumber` accepts an expression whose intermediate inf or nan turns finite again, such as `1/(1/0)`, as wasm has no
   floating-point exception flags.
