@@ -140,10 +140,13 @@ The window draws correctly, and Christian counted 1.6x as close on 2026-11-07, a
       app delegate that closes every window on quit and cancels. `TestQuitClosesEveryWindow` quits by Cmd+Q, `terminate:` and the quit
       Apple Event in a child, which fails without the delegate, where AppKit exits with status 0. `TestMenu` fails without the Quit
       item. Cmd+W and Minimize need a key window, which tests can't have.
-- [ ] By hand on the MacBook: click, drag, scroll, type and copy and paste in `examples/counter` and a text field, as no test
+- [x] By hand on the MacBook: click, drag, scroll, type and copy and paste in `examples/counter` and a text field, as no test
       reaches the real mouse, keyboard or clipboard. Also Cmd+Q, Cmd+W, Minimize, the Dock's Quit, the close button, dragging an
-      edge while the counter ticks, and whether the first show activates. With a second screen of another scale, moving the window
-      there and opening it there.
+      edge while the counter ticks, and whether the first show activates. (2026-11-08) — partial: all of these work at `1ebbfd6`,
+      except a dead key, which "By hand on the MacBook" in `docs/design.md` records. Left: the second screen below.
+- [ ] By hand with a second screen of another scale: move the window there, and open it there. No screen was at hand on 2026-11-08.
+- [ ] Decide on dead keys: ´ then e types "e", as in the C host, since neither goes through `interpretKeyEvents:`. Recommendation:
+      keep it as a known limit until IME, which needs `NSTextInputClient` too, and tell BUI's owner, as the C host has the same gap.
 - [x] A test job on `macos-latest` for whatever works without a logged-in session, plus a documented manual run on the MacBook.
       (2026-11-08) — the runner has a logged-in session, so the existing macOS job now also runs `go test -v ./internal/host/cocoa`
       without cgo, with none skipped for want of a display. Input tests wait until the window is on screen, as AppKit dropped

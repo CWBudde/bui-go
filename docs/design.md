@@ -397,8 +397,8 @@ session, so the Cocoa tests open real windows there and take the events they mak
 - **The macOS window host is mostly done,** described under "The Cocoa spike", "Input on macOS", "Menu, quit and live
   resize" and "Scale changes". It lacks IME. It is a port of
   `kit_window_cocoa.m` (1921 lines), started before BUI's owner answered on [BUI#8](https://github.com/ppmpreetham/BUI/issues/8).
-  Its input has only been driven by events the tests made, on the MacBook and on GitHub's runner, not by a hand on a real mouse
-  and keyboard.
+  Tests drive its input with events they make, on the MacBook and on GitHub's runner. A hand on a real trackpad and keyboard
+  checked it once, as "By hand on the MacBook" describes.
 - **A real pointer on a real desktop has not been tried.** Drawing, the `Do` ticker, resizing and the close button were checked on a
   real X session and window manager, through `xdotool windowsize` and `wmctrl -c`. Hovering and dragging were driven on Xvfb only.
 
@@ -565,7 +565,33 @@ Every combination runs even after one fails, and the command exits non-zero if a
   "On a MacBook" describes.
 - **What only a hand checks:** a real click, drag, scroll and typing, the real clipboard, a warp, and activation, as
   `examples/counter` shows them, as well as Cmd+W, Minimize, the Dock's Quit, the close button and dragging an edge with the real
-  pointer.
+  pointer. "By hand on the MacBook" has the last such check.
+
+### By hand on the MacBook
+
+On 2026-11-08, at `1ebbfd6`, Christian worked `examples/counter` and a copy of it with a text field, and with an optional second
+window, on the MacBook's trackpad and German keyboard. Both programs were built on the Mac and started over SSH. Each printed every
+event to a log, which was read alongside what he saw.
+
+- **The first show activates.** The window came up in front of VS Code with the focus, and `lsappinfo front` named the program.
+  Asking System Events for the frontmost process over SSH still answered "Code", so it is no use for this check.
+- **Click, drag and hover work.** Seven clicks gave seven counts, the slider followed the pointer, and the button and slider
+  lit up under the pointer and went dark when it left the window.
+- **The wheel scrolls the region, and Cmd+wheel steps a slider.** A plain wheel over the slider leaves it alone and scrolls the
+  window's content when the window is smaller than the content. Cmd+wheel stepped the slider by 0.01 a notch. That is the kit's
+  rule (`bk_value_wheel`: only Ctrl+wheel changes a value, as in Blender), and the host maps Command to Ctrl.
+- **Dragging an edge keeps drawing,** and the clock went on ticking while the button was held.
+- **Typing works, apart from dead keys.** Word jumps, Backspace, Shift-selection, double-click on a word, ß, ü and ö all work.
+  ´ followed by e types "e", and ´ followed by Space types " ". The C host behaves the same: both send `[NSEvent characters]`,
+  which is empty for the dead key, and neither goes through `interpretKeyEvents:`, which would carry the dead key's state.
+- **The real clipboard works both ways.** Cmd+C in the field pasted correctly in another app, and 170 characters copied in
+  another app arrived whole with Cmd+V.
+- **Every way of quitting ends `Run`.** Cmd+Q, the Dock's Quit, the close button and Cmd+W on the last window each printed "clean
+  shutdown", and the process exited with status 0.
+- **Cmd+W and Minimize act on the key window.** With two windows, Cmd+W closed only the key one, and the other went on ticking
+  and counted the first click it got. Cmd+M and the Window menu's Minimize both minimized, and the window drew correctly, with the
+  current time, when restored from the Dock.
+- **Not checked:** a second screen of another scale, and a warp.
 
 ## Known limits
 
@@ -575,7 +601,8 @@ Every combination runs even after one fails, and the command exits non-zero if a
   but a bug inside the kit can go undetected here that would crash natively.
 - Linear memory never shrinks: the largest raster or string a process had stays in its footprint, and a scratch buffer stays at its
   largest size too. Past 1 GiB the process ends (see "Out of memory").
-- Core X cursors, not the desktop's cursor theme. No Compose or IME input.
+- Core X cursors, not the desktop's cursor theme. No Compose or IME input, and on macOS no dead keys (´ then e types "e"), as in
+  BUI's C host.
 - No worker threads. Video and the file browser are off, and an image source stays pending forever (see "Images without threads").
 - Only the embedded Inter face works by default. Named families need a mount or `BUI_text_add_font`.
 - Custom nodes with a C `draw` callback are not reachable. The Go binding does not expose them today.
