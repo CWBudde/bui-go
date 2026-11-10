@@ -152,9 +152,12 @@ func (h *Headless) RenderDamage(full bool) []image.Rectangle {
 	return damage
 }
 
-// NeedsRender reports whether anything is waiting to be drawn.
+// NeedsRender reports whether anything is waiting to be drawn, a Resize to a
+// size other than the last render's included.
 func (h *Headless) NeedsRender() bool {
-	return kit.NeedsRender(h.live())
+	ctx := h.live()
+
+	return h.w != h.rw || h.h != h.rh || kit.NeedsRender(ctx)
 }
 
 // Resize sets the size of the next render. It panics where NewHeadless does.

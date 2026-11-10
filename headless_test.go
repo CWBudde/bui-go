@@ -3,9 +3,13 @@
 package bui
 
 import (
+	"fmt"
 	"image"
 	"image/color"
+	"slices"
 	"testing"
+
+	"github.com/CWBudde/bui-go/internal/engine"
 )
 
 // The raster comes out at the size of the last render, opaque, with the
@@ -82,6 +86,81 @@ func TestHeadlessResize(t *testing.T) {
 
 	for _, size := range [][2]int{{0, 10}, {10, -1}, {100000, 100000}} {
 		mustPanic(t, "Resize with a bad size", func() { h.Resize(size[0], size[1]) })
+	}
+}
+
+// A Resize waits for a render, even when nothing in the tree changed, so a host
+// that draws only on NeedsRender still follows the new size.
+func TestHeadlessNeedsRenderAfterResize(t *testing.T) {
+	_, _, h := buttonInFrame(t)
+
+	if h.NeedsRender() {
+		t.Fatal("NeedsRender right after Render")
+	}
+
+	h.Resize(200, 80)
+
+	if !h.NeedsRender() {
+		t.Fatal("no NeedsRender after a Resize")
+	}
+
+	h.Resize(320, 120)
+
+	if h.NeedsRender() {
+		t.Error("NeedsRender after a Resize back to the rendered size")
+	}
+
+	h.Resize(200, 80)
+	h.Render()
+
+	if h.NeedsRender() {
+		t.Error("NeedsRender after rendering the new size")
+	}
+}
+
+// pressSpy records the modifiers that reach the kit's press and release.
+type pressSpy struct {
+	engine.Kit
+
+	calls []string
+}
+
+func (s *pressSpy) PressMods(ctx engine.Context, x, y, mods int) {
+	s.calls = append(s.calls, fmt.Sprintf("press %d", mods))
+	s.Kit.PressMods(ctx, x, y, mods)
+}
+
+func (s *pressSpy) ReleaseMods(ctx engine.Context, x, y, mods int) {
+	s.calls = append(s.calls, fmt.Sprintf("release %d", mods))
+	s.Kit.ReleaseMods(ctx, x, y, mods)
+}
+
+// PressMods hands the kit the modifiers with ModButton1 added, and ReleaseMods
+// without it, whatever the caller passes.
+func TestHeadlessPressModsReachTheKit(t *testing.T) {
+	_, btn, h := buttonInFrame(t)
+
+	spy := &pressSpy{Kit: kit}
+	kit = spy
+
+	t.Cleanup(func() { kit = spy.Kit })
+
+	x, y, w, ht := btn.Rect()
+	cx, cy := x+w/2, y+ht/2
+
+	h.PressMods(cx, cy, ModShift)
+	h.ReleaseMods(cx, cy, ModShift|ModButton1)
+	h.PressMods(cx, cy, ModCtrl|ModButton1)
+	h.ReleaseMods(cx, cy, ModCtrl)
+
+	want := []string{
+		fmt.Sprintf("press %d", ModShift|ModButton1),
+		fmt.Sprintf("release %d", ModShift),
+		fmt.Sprintf("press %d", ModCtrl|ModButton1),
+		fmt.Sprintf("release %d", ModCtrl),
+	}
+	if !slices.Equal(spy.calls, want) {
+		t.Errorf("calls %q, want %q", spy.calls, want)
 	}
 }
 
