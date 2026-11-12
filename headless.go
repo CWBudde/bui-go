@@ -66,8 +66,9 @@ func (ctx *context) free() {
 // of the kit-touching API.
 //
 // Its input calls are the kit's, so a program can show the raster in a window of
-// its own and forward that window's events. Coordinates are raster pixels. Without
-// a window host, the kit's cursor, clipboard and timer requests go nowhere.
+// its own and forward that window's events. Coordinates are raster pixels. SetHost
+// hands that window the kit's redraw requests, cursor, clipboard and timers, which
+// otherwise go nowhere.
 type Headless struct {
 	ctx    *context
 	r      engine.Raster
