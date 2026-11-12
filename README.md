@@ -69,7 +69,8 @@ for win.next() { // the program's own loop, on the UI thread
 		view.Timer(t)
 	}
 	if view.NeedsRender() || view.Animating() {
-		win.blit(view.Image(), view.RenderDamage(false))
+		damage := view.RenderDamage(false) // render first: Image copies the last render
+		win.blit(view.Image(), damage)
 	}
 }
 ```
