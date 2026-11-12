@@ -9,7 +9,9 @@ Open work for bui-go, as of 2026-11-12. Finished work belongs in `docs/design.md
 - BUI's owner wants the binding in-tree at `bindings/go`. We asked four questions on
   [BUI#8](https://github.com/ppmpreetham/BUI/issues/8#issuecomment-6707514269), about the committed wasm, the second X11 host,
   pinning and tags. Christian started Phase 3 on 2026-11-08, in the fork only. The owner
-  [answered](https://github.com/ppmpreetham/BUI/issues/8) on 2026-11-09, and nobody has replied yet: see Phase 3.
+  [answered](https://github.com/ppmpreetham/BUI/issues/8) on 2026-11-09. Christian
+  [replied](https://github.com/ppmpreetham/BUI/issues/8#issuecomment-6822364116) on 2026-11-12, and we wait for the owner: see
+  Phase 3.
 - [bui-go#9](https://github.com/CWBudde/bui-go/pull/9) is merged, so `main` has the macOS baseline.
 - [bui-go#10](https://github.com/CWBudde/bui-go/pull/10) is merged, so `main` has the Cocoa spike. Christian counted its 1.6x as
   close and lifted the hold on the port, so the port goes ahead before the owner answers.
@@ -28,11 +30,13 @@ Open work for bui-go, as of 2026-11-12. Finished work belongs in `docs/design.md
   [bui-go#20](https://github.com/CWBudde/bui-go/pull/20) are merged, so `main` has the fixes for the review findings on the hosts.
 - [bui-go#21](https://github.com/CWBudde/bui-go/pull/21) is merged, so `main`'s `Headless` has pixels, damage and the kit's input.
   [bui-go#22](https://github.com/CWBudde/bui-go/pull/22) is merged too, with the check by hand on the MacBook.
-- [bui-go#23](https://github.com/CWBudde/bui-go/pull/23) gives `Headless` the host's side of the embedding API.
+- [bui-go#23](https://github.com/CWBudde/bui-go/pull/23) is merged, so `main`'s `Headless` has the host's side of the embedding
+  API. [CWBudde/BUI#5](https://github.com/CWBudde/BUI/pull/5) carries #21 to #23 into the fork.
 - The three Phase 3 PRs are merged into the fork's `main` (`9fdcceb`), not upstream:
   [CWBudde/BUI#1](https://github.com/CWBudde/BUI/pull/1), [CWBudde/BUI#4](https://github.com/CWBudde/BUI/pull/4) (the X11 host,
   which [CWBudde/BUI#2](https://github.com/CWBudde/BUI/pull/2) had merged into PR 1's branch) and
   [CWBudde/BUI#3](https://github.com/CWBudde/BUI/pull/3).
+- Upstream's `main` is 113 commits past the fork's base `e8126ca`, as of 2026-11-12.
 - BUI tagged `v0.5.0` on 2026-11-08, 112 commits past `v0.4.1` (see Phase 0).
 - A trial bump to BUI `bca7b8d` worked: the wasm built unmodified, reproduced byte for byte, and passed without cgo with the golden
   hashes unchanged. With cgo, only `TestNoDisplay` failed (see Phase 0).
@@ -61,7 +65,8 @@ None of this depends on the owner's answer.
 - [ ] Hover and drag with a real pointer on a real X session. So far these have only been driven on Xvfb.
 - [ ] Wasm containment: a trap or out-of-memory ends the process. The owner asks for a way to catch it (Phase 3), so this is no
       longer "keep it and file an issue". A module that trapped is in an unknown state, so catching means at least reporting the
-      error and refusing further kit calls. Christian decides the API: an error from `Run`, a hook, or both.
+      error and refusing further kit calls. Christian decided on 2026-11-12: both, an error from `Run` and a hook, after which kit
+      calls are refused. It comes after PR 1 goes upstream, as the reply on BUI#8 says.
 - [x] Make the load in `scripts/bench.sh` independent of the locale: on the German MacBook `sysctl` gives `7,05`. Set `LC_ALL=C`.
       (2026-11-08) — `LC_ALL=C` on the `sysctl` call alone. On the MacBook under `de_DE.UTF-8`, the old `load()` printed
       `1,47 2,14 2,30` and the new one `1.47 2.14 2.30`. The header of `bench/2026-11-07-a06371a.txt` now uses dots too.
@@ -208,14 +213,18 @@ decides to open the upstream PRs.
       `cmake`, `rust` and `package` jobs are unaffected too. (2026-11-08) — partial: with that `replace`, the Go proxy fetched PR
       1's module at `d4bb297`, and its README example ran with `CGO_ENABLED=0`. BUI's jobs are green on all three.
       PR 2 and PR 3 still need the scratch module, and all three need it again on the commit that goes upstream.
-- [ ] Reply on [BUI#8](https://github.com/ppmpreetham/BUI/issues/8). Christian does that. Points the answer can already state: wazero
+- [x] Reply on [BUI#8](https://github.com/ppmpreetham/BUI/issues/8). Christian does that. Points the answer can already state: wazero
       is in `THIRD_PARTY_NOTICES.md` (the fork's `main`, "The Go binding"), and the changelog, docs, README and website are updated.
       On size: `bui_kit.wasm` grew 2,445 bytes from `v0.4.1` to `v0.5.0` (3,454,663 to 3,457,108). It is 1.33 MB gzipped, an upper
-      bound for what each update adds to the history, as git's delta compression on it is not measured.
+      bound for what each update adds to the history, as git's delta compression on it is not measured. (2026-11-12) —
+      [posted](https://github.com/ppmpreetham/BUI/issues/8#issuecomment-6822364116) as CWBudde, with Christian's decisions on the
+      wasm, the hosts, the generator and trap handling below. It asks the owner to create the wasm repository or name it.
 - [ ] Keep the wasm off `main`, as the owner asks: CI builds it from the release tag with the pinned toolchain, and a bot commits it
       to a separate branch or repository that `go get` can fetch, for example `ppmpreetham/BUI-go`. CI rebuilds it from the pinned
-      commit and fails if its checksum differs from the committed one. Christian decides between a branch and a repository, and how
-      the module path then reads.
+      commit and fails if its checksum differs from the committed one. Christian decided on 2026-11-12: a repository holding only
+      `bui_kit.wasm` and a small package that embeds it, as its own Go module. `bindings/go` stays on `main` under its path and
+      requires that module at the BUI version, and a `go.work` points at a local build for work on `main`. Waits for the owner to
+      create the repository or name it, and for a token the bot can push with.
 - [x] A public embedding API, so that a window host can live outside package `bui`: render to a pixel buffer and feed events, as the
       owner asks. (2026-11-12) — `Headless` has `Image`, `RenderDamage`, `NeedsRender`, `Resize` and the kit's input with `Mod`
       bits ([bui-go#21](https://github.com/CWBudde/bui-go/pull/21)). [bui-go#23](https://github.com/CWBudde/bui-go/pull/23) adds
@@ -223,17 +232,22 @@ decides to open the upstream PRs.
       `Timer`, plus `Animating`, and `Flush` with `SetWake` for a loop of the program's own. A test per callback passes on both
       engines.
 - [ ] Then the X11 and Cocoa hosts as optional packages on that API, outside the core, or in the repository and clearly marked as
-      the owner allows. Christian decides where they go.
-- [ ] Carry the embedding API into the fork once it is complete, as fresh commits on the fork's `main`.
+      the owner allows. Christian decided on 2026-11-12: a separate module outside BUI, and the core binding is headless only. Still
+      open: which repository holds that module (bui-go itself, or a new one) and its path.
+- [ ] Carry the embedding API into the fork once it is complete, as fresh commits on the fork's `main`. (2026-11-12) — partial:
+      [CWBudde/BUI#5](https://github.com/CWBudde/BUI/pull/5) carries #21 to #23 as fresh commits, with the docs and a changelog
+      entry. Its code files match bui-go's `main` apart from the import path, `just check` passes in `bindings/go`, and the 26
+      carried tests pass with and without cgo. It still has to merge into the fork's `main`.
 - [ ] A release gate, as the owner asks: BUI's release workflow rebuilds the wasm from the release tag and runs the Go tests, and
       `tools/check_versions.py` checks the kit version that `bindings/go` pins.
 - [ ] Tags `bindings/go/vX.Y.Z` with the number of the BUI release, made by `tools/release.py` rather than by hand.
 - [ ] Startup time, frame time and memory against the native kit, in the form of the other bindings on the website's benchmarks
       page. `scripts/bench.sh` and `bench/` have frame times already.
 - [ ] Generate the API from `BUI_kit.h` instead of writing it by hand, as the owner asks, so it can't drift from the kit. This
-      touches the seam (`internal/engine`), both engines and `wasm/shim.c`. Christian decides the scope.
-- [ ] Open the upstream PRs on `ppmpreetham/BUI`. Christian decides when, after the reply on BUI#8. Rebase onto upstream's `main`
-      first: the fork's work sits on `e8126ca`, one commit behind upstream on 2026-11-10.
+      touches the seam (`internal/engine`), both engines and `wasm/shim.c`. Christian decides the scope. He decided on 2026-11-12
+      that it comes after PR 1 goes upstream.
+- [ ] Open the upstream PRs on `ppmpreetham/BUI`. Christian decides when, after the owner answers the reply on BUI#8. Rebase onto
+      upstream's `main` first: the fork's work sits on `e8126ca`, 113 commits behind upstream on 2026-11-12.
 - [ ] After the merge, archive bui-go with a pointer to `bindings/go`, or keep it as a mirror. Christian decides.
 
 ## Not planned yet
