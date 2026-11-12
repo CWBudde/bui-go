@@ -53,8 +53,28 @@ func main() {
 `Scroll`, `Key` with an X keysym name and the typed text, and `ContextMenu`. It leaves out the kit's raw `KeyRelease` and
 `Button`, which reach only "events" nodes, and package `bui` has no handler for those yet. Coordinates are raster pixels. `Image` returns
 the last render as an `*image.RGBA`, `RenderDamage` the rectangles whose pixels changed, and `Resize` sets the next render's
-size. So a program can show the raster in a window of its own and forward that window's events. The cursor, the clipboard
-and timers need a window host, which `Headless` doesn't have: those requests go nowhere.
+size. So a program can show the raster in a window of its own and forward that window's events.
+
+That window gets the kit's requests through `SetHost`, with a `bui.Host`: `Redraw`, `SetCursor`, `Warp`, the clipboard, and
+`Schedule` for timers, which the program fires back with `Timer`. Without a host, those requests go nowhere. A program with a loop
+of its own runs `Do` functions with `Flush`, and `SetWake` tells it when there are some:
+
+```go
+view.SetHost(win) // win implements bui.Host and notes what the kit asks
+bui.SetWake(win.wake) // called from Do's goroutine: post an event to the loop
+
+for win.next() { // the program's own loop, on the UI thread
+	bui.Flush()           // queued Do functions and deferred frees
+	for _, t := range win.dueTimers() {
+		view.Timer(t)
+	}
+	if view.NeedsRender() || view.Animating() {
+		win.blit(view.Image(), view.RenderDamage(false))
+	}
+}
+```
+
+Host methods run inside the kit call that caused them, so they note what to do and leave the doing to the loop.
 
 CI runs the tests on macOS, including the Cocoa host's tests, which open real windows, but only cross-builds for Windows, so that platform is
 untested.

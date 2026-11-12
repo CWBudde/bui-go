@@ -323,6 +323,22 @@ run passes `-ldflags='-s=false -w=false'`. The allocation tests skip under `-asa
 from inside a handler. `internal/host/x11` covers a panic in a `Do` function in the loop, and a broken connection, which closes every
 window and makes `Run` return `ErrDisplayLost`. On the native engine Xlib's default handler ends the process instead.
 
+## A window of the program's own
+
+The owner asked on [BUI#8](https://github.com/ppmpreetham/BUI/issues/8) for "render to a pixel buffer + feed events", so that a
+program can be the window. `Headless` renders and takes the kit's input. `Headless.SetHost` adds the other direction: an unexported
+adapter turns a public `bui.Host` into the `engine.WindowHost` the engines call, and installs it with `ContextSetWindowHost`.
+
+- **Each adapter call counts as an emit.** It raises `emitDepth`, so a `Close` in a Host method waits until the kit call it runs in
+  has returned, as from a handler. Without that, `Close` freed the context under `BK_motion`, which the test shows.
+- **A panic in a Host method ends the process on both engines.** The adapter defers `engine.ExitIfUnwinding` itself. The cgo
+  engine's trampolines do too, but the wasm engine's host functions don't, and a public interface should not depend on the engine.
+- **Timers need no bookkeeping.** `BK_timer` ignores a tooltip serial that is no longer current, and the custom-node timer checks
+  the due times and arms itself again. So a host fires every timer it was given, once its time has passed.
+- **`Flush` and `SetWake` are `Run`'s wake for a loop of the program's own.** `Do` still wakes the built-in host as well. That does
+  nothing without a running loop: a buffered channel on X11, a non-blocking pipe natively, a no-op headless. The Cocoa host posts an
+  application-defined event once `Supported` has run, which a program with its own Cocoa loop sees and should ignore.
+
 ## The X11 host
 
 `internal/host/x11` is a Go port of `kit_window_x11.c` on `jezek/xgb`.
