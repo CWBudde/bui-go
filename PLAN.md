@@ -1,6 +1,6 @@
 # Plan
 
-Open work for bui-go, as of 2026-11-10. Finished work belongs in `docs/design.md` and the git history, not here.
+Open work for bui-go, as of 2026-11-12. Finished work belongs in `docs/design.md` and the git history, not here.
 
 ## Where we stand
 
@@ -26,6 +26,9 @@ Open work for bui-go, as of 2026-11-10. Finished work belongs in `docs/design.md
   review found in the fork's PR 1.
 - [bui-go#18](https://github.com/CWBudde/bui-go/pull/18), [bui-go#19](https://github.com/CWBudde/bui-go/pull/19) and
   [bui-go#20](https://github.com/CWBudde/bui-go/pull/20) are merged, so `main` has the fixes for the review findings on the hosts.
+- [bui-go#21](https://github.com/CWBudde/bui-go/pull/21) is merged, so `main`'s `Headless` has pixels, damage and the kit's input.
+  [bui-go#22](https://github.com/CWBudde/bui-go/pull/22) is merged too, with the check by hand on the MacBook.
+- [bui-go#23](https://github.com/CWBudde/bui-go/pull/23) gives `Headless` the host's side of the embedding API.
 - The three Phase 3 PRs are merged into the fork's `main` (`9fdcceb`), not upstream:
   [CWBudde/BUI#1](https://github.com/CWBudde/BUI/pull/1), [CWBudde/BUI#4](https://github.com/CWBudde/BUI/pull/4) (the X11 host,
   which [CWBudde/BUI#2](https://github.com/CWBudde/BUI/pull/2) had merged into PR 1's branch) and
@@ -213,12 +216,12 @@ decides to open the upstream PRs.
       to a separate branch or repository that `go get` can fetch, for example `ppmpreetham/BUI-go`. CI rebuilds it from the pinned
       commit and fails if its checksum differs from the committed one. Christian decides between a branch and a repository, and how
       the module path then reads.
-- [ ] A public embedding API, so that a window host can live outside package `bui`: render to a pixel buffer and feed events, as the
-      owner asks. (2026-11-10) — partial: `Headless` now has `Image`, `RenderDamage`, `NeedsRender` and `Resize`, and the kit's
-      input as `PressMods`, `ReleaseMods`, `Motion`, `Wheel`, `Scroll`, `Key` and `ContextMenu`, with `Mod` bits. Open: the host's
-      side, which `engine.WindowHost` has internally: redraw requests, the cursor, warping, the clipboard and timers (`Timer`),
-      plus `Animating`, and how an outside loop drains `Do` and runs deferred frees. The raw-only `KeyRelease` and `Button` reach
-      only "events" nodes, which package `bui` has no handler for yet.
+- [x] A public embedding API, so that a window host can live outside package `bui`: render to a pixel buffer and feed events, as the
+      owner asks. (2026-11-12) — `Headless` has `Image`, `RenderDamage`, `NeedsRender`, `Resize` and the kit's input with `Mod`
+      bits ([bui-go#21](https://github.com/CWBudde/bui-go/pull/21)). [bui-go#23](https://github.com/CWBudde/bui-go/pull/23) adds
+      the host's side: `SetHost` with a `bui.Host` for redraw requests, the cursor, warps, the clipboard and timers, fired back with
+      `Timer`, plus `Animating`, and `Flush` with `SetWake` for a loop of the program's own. A test per callback passes on both
+      engines.
 - [ ] Then the X11 and Cocoa hosts as optional packages on that API, outside the core, or in the repository and clearly marked as
       the owner allows. Christian decides where they go.
 - [ ] Carry the embedding API into the fork once it is complete, as fresh commits on the fork's `main`.
@@ -238,3 +241,4 @@ decides to open the upstream PRs.
 - Windows host: a port of `kit_window_win32.c`. Windows is built but has never been run.
 - Native Wayland in the Go host.
 - GPU rendering, video, the file browser and IME in the wasm engine.
+- The kit's raw `KeyRelease` and `Button` on `Headless`. They reach only "events" nodes, which package `bui` has no handler for.

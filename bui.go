@@ -35,17 +35,24 @@ func init() {
 var (
 	doMu    sync.Mutex
 	doQueue []func()
+	doWake  func() // SetWake's function
 )
 
 // Do queues f to run on the UI thread, in FIFO order. It is safe from any
-// goroutine and never blocks. Functions queued before Run run when Run starts.
+// goroutine and never blocks unless SetWake's function does. Functions queued before
+// Run run when Run starts. A program with a loop of its own runs them with Flush.
 func Do(f func()) {
 	doMu.Lock()
-	defer doMu.Unlock()
 
 	doQueue = append(doQueue, f)
+	wake := doWake
 
 	host.Wake()
+	doMu.Unlock()
+
+	if wake != nil {
+		wake()
+	}
 }
 
 func pendingDo() int {
