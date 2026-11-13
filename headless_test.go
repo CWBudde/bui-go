@@ -451,6 +451,8 @@ func TestHeadlessInputAfterClosePanics(t *testing.T) {
 		"Scroll":       func() { h.Scroll(0, 0, 0, 1, 0) },
 		"Key":          func() { h.Key("a", "a", 0) },
 		"ContextMenu":  func() { h.ContextMenu(0, 0, 0) },
+		"SetScale":     func() { h.SetScale(2) },
+		"CopyBGRA":     func() { h.CopyBGRA(nil, image.Rect(0, 0, 1, 1)) },
 	} {
 		mustPanic(t, "Headless."+name, f)
 	}

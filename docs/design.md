@@ -339,6 +339,23 @@ adapter turns a public `bui.Host` into the `engine.WindowHost` the engines call,
   nothing without a running loop: a buffered channel on X11, a non-blocking pipe natively, a no-op headless. The Cocoa host posts an
   application-defined event once `Supported` has run, which a program with its own Cocoa loop sees and should ignore.
 
+### What a host outside package bui needs
+
+The X11 and Cocoa hosts are to move out of package `bui`, onto `Headless` and `bui.Host`. They called four things on `engine.Kit`
+that `Headless` lacked:
+
+- **The scale.** `BK_set_scale` holds one scale for the process. The Cocoa host selects each window's scale before every call for
+  that window, and calls `NodeRelayout` on the root when the scale changes, as sizes measured before stay until then.
+  `Headless.SetScale` does both for a `Headless`. One that never called it leaves the scale alone, so nothing changes for
+  existing programs. The X11 host sets one scale for the process when it opens a window, so a `Headless` with a scale of its own
+  changes what such a window draws at, until that host moves onto `SetScale`.
+- **The pixels without a full copy.** Both hosts present from `RasterView`, the kit's words as B, G, R and a top byte that holds
+  nothing, without copying. `Image` copies the raster twice and converts it to RGBA. `CopyBGRA` copies one rectangle once and sets
+  the fourth byte to 255. For a 1920x1080 frame into a reused buffer on the i7-1255U, it took 1.3 to 1.5 ms on either engine and
+  allocated nothing, against 4.6 to 8.2 ms and 16.6 MB for `Image` (`BenchmarkHeadlessFrame`, three runs each).
+- **`ImagePoll` needs no call.** `BK_render` polls first, and the wasm module decodes no images (see "Images without threads").
+- **`KeyRelease` needs no call.** It reaches only "events" nodes, which package `bui` has no handler for.
+
 ## The X11 host
 
 `internal/host/x11` is a Go port of `kit_window_x11.c` on `jezek/xgb`.
