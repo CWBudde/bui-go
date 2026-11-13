@@ -96,6 +96,32 @@ func TestHeadlessScalesShareAProcess(t *testing.T) {
 	}
 }
 
+// The relayout asks the host for a redraw, so a Close there waits until SetScale's kit
+// call returns, and SetScale then frees the Headless, as the input calls do.
+func TestHeadlessCloseFromHostInSetScale(t *testing.T) {
+	_, h := buttonAtNaturalSize(t)
+
+	redrawn := false
+	spy := &spyHost{}
+	spy.onRedraw = func() {
+		spy.onRedraw = nil
+		redrawn = true
+
+		h.Close()
+	}
+	h.SetHost(spy)
+
+	h.SetScale(2)
+
+	if !redrawn {
+		t.Fatal("SetScale asked the host for no redraw, so the test cannot close from one")
+	}
+
+	if h.r != 0 {
+		t.Error("the Headless was not freed after SetScale returned")
+	}
+}
+
 // SetScale refuses a scale the kit cannot draw at.
 func TestHeadlessSetScaleRange(t *testing.T) {
 	_, h := buttonAtNaturalSize(t)

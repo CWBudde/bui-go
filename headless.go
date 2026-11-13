@@ -153,7 +153,8 @@ func (h *Headless) SetScale(scale float64) {
 
 	h.scale = s
 	kit.SetScale(s)
-	kit.NodeRelayout(kit.ContextRoot(h.ctx.c))
+	kit.NodeRelayout(kit.ContextRoot(h.ctx.c)) // asks the host for a redraw
+	runDeferred()
 }
 
 // Render lays out and draws the whole tree.
