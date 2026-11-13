@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"image"
+	"math"
+	"slices"
 
 	"github.com/CWBudde/bui-go/internal/engine"
 )
@@ -72,8 +74,9 @@ func (ctx *context) free() {
 type Headless struct {
 	ctx    *context
 	r      engine.Raster
-	w, h   int // the size of the next render
-	rw, rh int // the raster's size, from the last render
+	w, h   int     // the size of the next render
+	rw, rh int     // the raster's size, from the last render
+	scale  float32 // the UI scale from SetScale, 0 before the first
 }
 
 // Mod is a set of modifier keys and held buttons, as the kit's BK_SHIFT and so on.
@@ -115,12 +118,42 @@ func checkHeadlessSize(w, h int) {
 	}
 }
 
+// live returns h's context, with h's scale selected: the kit's scale is process-wide, so
+// each call that may draw or measure for h goes through here.
 func (h *Headless) live() engine.Context {
 	if h.ctx.closing {
 		panic("bui: use of closed Headless")
 	}
 
+	if h.scale != 0 {
+		kit.SetScale(h.scale)
+	}
+
 	return h.ctx.c
+}
+
+// SetScale sets the UI scale h draws at, where 1 means 20 px widgets, as a window host
+// does from the screen's resolution. A new scale lays the tree out again at the next
+// render; the raster keeps its size. It panics on a scale that is not positive and finite.
+//
+// The kit's scale is process-wide, so h selects its own before each of its calls, and
+// Headless values of different scales can share a process. Until SetScale, h draws at the
+// kit's scale as it stands: 1, unless another Headless or a Window's host changed it.
+func (h *Headless) SetScale(scale float64) {
+	s := float32(scale)
+	if !(s > 0) || math.IsInf(float64(s), 0) {
+		panic(fmt.Sprintf("bui: UI scale %v is not positive and finite", scale))
+	}
+
+	h.live()
+
+	if s == h.scale {
+		return
+	}
+
+	h.scale = s
+	kit.SetScale(s)
+	kit.NodeRelayout(kit.ContextRoot(h.ctx.c))
 }
 
 // Render lays out and draws the whole tree.
@@ -185,6 +218,41 @@ func (h *Headless) Image() *image.RGBA {
 	}
 
 	return img
+}
+
+// CopyBGRA appends the pixels of r in the raster, as the last render left it, to dst and
+// returns the extended slice: B, G, R, A bytes, opaque, row by row. r is clipped to the
+// raster. It copies only r, once, so a host presenting a frame passes the rectangles
+// RenderDamage returned and reuses dst, where Image would copy the whole raster twice.
+func (h *Headless) CopyBGRA(dst []byte, r image.Rectangle) []byte {
+	const pixelSize = 4
+
+	h.live()
+
+	r = r.Intersect(image.Rect(0, 0, h.rw, h.rh))
+	if r.Empty() {
+		return dst
+	}
+
+	// The view is good until the next kit call, and none runs before the copy is done.
+	view := kit.RasterView(h.r)
+	if len(view) != pixelSize*h.rw*h.rh {
+		panic(fmt.Sprintf("bui: raster has %d bytes, want %d x %d pixels", len(view), h.rw, h.rh))
+	}
+
+	dst = slices.Grow(dst, pixelSize*r.Dx()*r.Dy())
+
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		start := len(dst)
+		dst = append(dst, view[pixelSize*(y*h.rw+r.Min.X):pixelSize*(y*h.rw+r.Max.X)]...)
+
+		// The kit's words are 0xXXRRGGBB, with nothing in the top byte.
+		for i := start + pixelSize - 1; i < len(dst); i += pixelSize {
+			dst[i] = 0xff
+		}
+	}
+
+	return dst
 }
 
 // Press sends a left-button press. The kit reports non-zero even on a miss, so
