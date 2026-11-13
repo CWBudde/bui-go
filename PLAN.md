@@ -1,6 +1,6 @@
 # Plan
 
-Open work for bui-go, as of 2026-11-12. Finished work belongs in `docs/design.md` and the git history, not here.
+Open work for bui-go, as of 2026-11-13. Finished work belongs in `docs/design.md` and the git history, not here.
 
 ## Where we stand
 
@@ -31,8 +31,9 @@ Open work for bui-go, as of 2026-11-12. Finished work belongs in `docs/design.md
 - [bui-go#21](https://github.com/CWBudde/bui-go/pull/21) is merged, so `main`'s `Headless` has pixels, damage and the kit's input.
   [bui-go#22](https://github.com/CWBudde/bui-go/pull/22) is merged too, with the check by hand on the MacBook.
 - [bui-go#23](https://github.com/CWBudde/bui-go/pull/23) is merged, so `main`'s `Headless` has the host's side of the embedding
-  API. [CWBudde/BUI#5](https://github.com/CWBudde/BUI/pull/5) carries #21 to #23 into the fork.
-- The three Phase 3 PRs are merged into the fork's `main` (`9fdcceb`), not upstream:
+  API. [CWBudde/BUI#5](https://github.com/CWBudde/BUI/pull/5) is merged too, so the fork's `main` (`6954d0c`) carries #21 to #23.
+  [bui-go#24](https://github.com/CWBudde/bui-go/pull/24) is merged, with the plan of that run.
+- The three Phase 3 PRs are merged into the fork's `main`, not upstream:
   [CWBudde/BUI#1](https://github.com/CWBudde/BUI/pull/1), [CWBudde/BUI#4](https://github.com/CWBudde/BUI/pull/4) (the X11 host,
   which [CWBudde/BUI#2](https://github.com/CWBudde/BUI/pull/2) had merged into PR 1's branch) and
   [CWBudde/BUI#3](https://github.com/CWBudde/BUI/pull/3).
@@ -232,12 +233,23 @@ decides to open the upstream PRs.
       `Timer`, plus `Animating`, and `Flush` with `SetWake` for a loop of the program's own. A test per callback passes on both
       engines.
 - [ ] Then the X11 and Cocoa hosts as optional packages on that API, outside the core, or in the repository and clearly marked as
-      the owner allows. Christian decided on 2026-11-12: a separate module outside BUI, and the core binding is headless only. Still
-      open: which repository holds that module (bui-go itself, or a new one) and its path.
-- [ ] Carry the embedding API into the fork once it is complete, as fresh commits on the fork's `main`. (2026-11-12) — partial:
+      the owner allows. Christian decided on 2026-11-12: a separate module outside BUI, and the core binding is headless only. He
+      decided on 2026-11-13 that bui-go is that module: the hosts become public packages here, built on package `bui`'s public API
+      only, and once `bindings/go` is upstream, bui-go requires it and keeps only the hosts.
+  - [x] Give `Headless` what the hosts called on `engine.Kit` and it lacked. (2026-11-13) — `SetScale` sets the scale one
+        `Headless` draws at, selects it before each of its calls, as the kit's scale is process-wide, and lays the tree out again
+        when it changes. `CopyBGRA` copies one rectangle of the last render as B, G, R, A into a reused buffer: 1.3 to 1.5 ms for a
+        1080p frame, against 4.6 to 8.2 ms for `Image`. `ImagePoll` and `KeyRelease` need no call. `TestHeadlessSetScale`,
+        `TestHeadlessScalesShareAProcess` and `TestHeadlessCopyBGRA` each fail with their part removed, on both engines. "What a
+        host outside package bui needs" in `docs/design.md` has the reasons.
+  - [ ] Move the X11 host onto `Headless` and `bui.Host`, as a public package, with `NewWindow` and `Run` of its own. Then the same
+        for Cocoa. Package `bui` then keeps no host, as in the fork.
+  - [ ] Carry `SetScale` and `CopyBGRA` into the fork, as fresh commits on its `main`.
+- [x] Carry the embedding API into the fork once it is complete, as fresh commits on the fork's `main`. (2026-11-12) —
       [CWBudde/BUI#5](https://github.com/CWBudde/BUI/pull/5) carries #21 to #23 as fresh commits, with the docs and a changelog
-      entry. Its code files match bui-go's `main` apart from the import path, `just check` passes in `bindings/go`, and the 26
-      carried tests pass with and without cgo. It still has to merge into the fork's `main`.
+      entry. `just check` passes in `bindings/go`, and the 26 carried tests pass with and without cgo. (2026-11-13) — merged as
+      `6954d0c`: there, `headless.go`, `headless_test.go`, `embed.go` and `embed_test.go` match bui-go's `main` apart from the
+      import path.
 - [ ] A release gate, as the owner asks: BUI's release workflow rebuilds the wasm from the release tag and runs the Go tests, and
       `tools/check_versions.py` checks the kit version that `bindings/go` pins.
 - [ ] Tags `bindings/go/vX.Y.Z` with the number of the BUI release, made by `tools/release.py` rather than by hand.
@@ -248,7 +260,8 @@ decides to open the upstream PRs.
       that it comes after PR 1 goes upstream.
 - [ ] Open the upstream PRs on `ppmpreetham/BUI`. Christian decides when, after the owner answers the reply on BUI#8. Rebase onto
       upstream's `main` first: the fork's work sits on `e8126ca`, 113 commits behind upstream on 2026-11-12.
-- [ ] After the merge, archive bui-go with a pointer to `bindings/go`, or keep it as a mirror. Christian decides.
+- [ ] After the merge, point bui-go's README at `bindings/go` for the binding. bui-go stays as the hosts module, as Christian
+      decided on 2026-11-13, so it is not archived.
 
 ## Not planned yet
 
