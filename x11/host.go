@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"slices"
 	"strconv"
@@ -239,7 +240,9 @@ func internSelection(c *xgb.Conn, i int) (xproto.Atom, error) {
 }
 
 // displayScale is BUI_UI_SCALE, or Xft.dpi as GHOST_SystemX11 reads it, else 1. The C
-// host takes any BUI_UI_SCALE, but one that parses to 0 or less makes no window.
+// host takes any BUI_UI_SCALE, but one that parses to 0 or less makes no window. One that
+// is not finite, such as "Inf", would make bui.Headless.SetScale panic, so it falls
+// through too.
 func displayScale(c *xgb.Conn, root xproto.Window) float32 {
 	const (
 		baseDPI       = 96
@@ -247,8 +250,10 @@ func displayScale(c *xgb.Conn, root xproto.Window) float32 {
 	)
 
 	if env := os.Getenv("BUI_UI_SCALE"); env != "" {
-		if v, err := strconv.ParseFloat(env, 32); err == nil && v > 0 {
-			return float32(v)
+		if v, err := strconv.ParseFloat(env, 32); err == nil {
+			if s, ok := scaleOf(v); ok {
+				return s
+			}
 		}
 	}
 
@@ -263,7 +268,19 @@ func displayScale(c *xgb.Conn, root xproto.Window) float32 {
 		return 1
 	}
 
-	return float32(dpi / baseDPI)
+	if s, ok := scaleOf(dpi / baseDPI); ok {
+		return s
+	}
+
+	return 1
+}
+
+// scaleOf returns v as a scale bui.Headless.SetScale takes: positive and finite as a
+// float32.
+func scaleOf(v float64) (float32, bool) {
+	s := float32(v)
+
+	return s, s > 0 && !math.IsInf(float64(s), 0)
 }
 
 // resourceDPI finds Xft.dpi in the RESOURCE_MANAGER property's lines, 0 for none.

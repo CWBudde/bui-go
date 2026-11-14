@@ -5,6 +5,7 @@ package x11
 import (
 	"bufio"
 	"errors"
+	"math"
 	"os"
 	"os/exec"
 	"runtime"
@@ -1158,6 +1159,27 @@ func TestResourceDPI(t *testing.T) {
 	}
 }
 
+// What Headless.SetScale takes: positive and finite as a float32, which an Xft.dpi of
+// "inf" or 1e300 is not.
+func TestScaleOf(t *testing.T) {
+	for _, tc := range []struct {
+		v  float64
+		ok bool
+	}{
+		{1, true},
+		{2.5, true},
+		{0, false},
+		{-1, false},
+		{math.Inf(1), false},
+		{1e300, false},
+		{math.NaN(), false},
+	} {
+		if _, ok := scaleOf(tc.v); ok != tc.ok {
+			t.Errorf("scaleOf(%v) ok = %v, want %v", tc.v, ok, tc.ok)
+		}
+	}
+}
+
 func TestDisplayScaleEnvironment(t *testing.T) {
 	h := testHost(t)
 
@@ -1176,10 +1198,10 @@ func TestDisplayScaleEnvironment(t *testing.T) {
 	}
 
 	// Nonsense falls through to the server's answer, at least 1.
-	for _, env := range []string{"0", "-1", "big"} {
+	for _, env := range []string{"0", "-1", "big", "Inf", "+inf", "NaN"} {
 		t.Setenv("BUI_UI_SCALE", env)
 
-		if got := displayScale(h.c, h.root); got < 1 {
+		if got := displayScale(h.c, h.root); !(got >= 1) || math.IsInf(float64(got), 0) {
 			t.Errorf("BUI_UI_SCALE=%s gives %v", env, got)
 		}
 	}
