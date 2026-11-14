@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-// Package x11 is a window host in pure Go, a port of BUI's kit_window_x11.c on xgb. The
-// kit renders into a raster in software, so a host only forwards input and presents
-// pixels. It works with any engine.Kit.
-//
-// All of it runs on the UI thread except Wake and the goroutine reading X events, which
-// only hands them over: see eventQueue.
 package x11
 
 import (
@@ -19,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CWBudde/bui-go/internal/engine"
+	bui "github.com/CWBudde/bui-go"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 )
@@ -36,11 +30,12 @@ const (
 // clipboardTimeout is how long a paste waits for the clipboard's owner, as in the C host.
 const clipboardTimeout = 300 * time.Millisecond
 
-// Host implements engine.Host on one X connection. It connects at the first Supported,
-// and stays connected for the life of the process, as the C host does.
-type Host struct {
-	kit engine.Kit
-
+// host is one X connection and its windows. It connects at the first Supported, and stays
+// connected for the life of the process, as the C host does.
+//
+// All of it runs on the UI thread except Wake and the goroutine reading X events, which
+// only hands them over: see eventQueue.
+type host struct {
 	c        *xgb.Conn
 	root     xproto.Window
 	visual   xproto.Visualid
@@ -51,7 +46,6 @@ type Host struct {
 	scale    float32
 
 	windows []*window
-	lastID  engine.Window
 	open    int
 
 	cursorFont xproto.Font
@@ -61,9 +55,12 @@ type Host struct {
 	hasClip bool
 
 	// wake holds at most one pending wake, so that Wake never blocks.
-	wake     chan struct{}
+	wake chan struct{}
+	// wakeFunc does a wake's work: bui.Flush, unless a test replaces it.
 	wakeFunc func()
 	quit     bool
+	// running is true during Run, and looping during its loop.
+	running, looping bool
 	// lost says the connection broke. Nothing the host does can work any more.
 	lost bool
 
@@ -73,8 +70,6 @@ type Host struct {
 	// putBuf holds the rows of a damage rectangle narrower than the raster.
 	putBuf []byte
 }
-
-var _ engine.Host = (*Host)(nil)
 
 // atoms are the interned names the host needs, once connected.
 type atoms struct {
@@ -93,14 +88,14 @@ func init() {
 	xgb.Logger = log.New(io.Discard, "", 0)
 }
 
-// New returns a host for kit. It does not connect yet, and it never calls kit before a
-// window opens, so that importing package bui costs nothing.
-func New(kit engine.Kit) *Host {
-	return &Host{kit: kit, wake: make(chan struct{}, 1)}
+// newHost returns a host that is not connected yet, so that importing the package costs
+// nothing.
+func newHost() *host {
+	return &host{wake: make(chan struct{}, 1), wakeFunc: bui.Flush}
 }
 
-// Supported implements engine.Host.
-func (h *Host) Supported() bool {
+// Supported is the package's Supported.
+func (h *host) Supported() bool {
 	if h.lost {
 		return false
 	}
@@ -126,7 +121,7 @@ func (h *Host) Supported() bool {
 
 // connect reads what the host needs from a new connection. The event goroutine starts
 // first, as it is what keeps replies flowing: see eventQueue.
-func (h *Host) connect(c *xgb.Conn) error {
+func (h *host) connect(c *xgb.Conn) error {
 	events := newEventQueue(c)
 
 	setup := xproto.Setup(c)
@@ -287,19 +282,17 @@ func resourceDPI(resources string) float64 {
 	return 0
 }
 
-// WakeInit implements engine.Host.
-func (h *Host) WakeInit(f func()) { h.wakeFunc = f }
-
-// Wake implements engine.Host.
-func (h *Host) Wake() {
+// Wake asks the loop to run wakeFunc. bui.Do calls it, from any goroutine, and it never
+// blocks.
+func (h *host) Wake() {
 	select {
 	case h.wake <- struct{}{}:
 	default:
 	}
 }
 
-// Quit implements engine.Host.
-func (h *Host) Quit() {
+// Quit is the package's Quit. A quit outside the loop stays until the next Run ends.
+func (h *host) Quit() {
 	h.quit = true
 	h.Wake()
 }

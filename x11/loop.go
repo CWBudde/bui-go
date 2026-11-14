@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/CWBudde/bui-go/internal/engine"
+	bui "github.com/CWBudde/bui-go"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 )
@@ -19,28 +19,49 @@ const framePeriod = time.Second / 60
 // and wakes their turn.
 const maxEventsPerTurn = 256
 
-// Run implements engine.Host. As in the C host it erases an earlier Quit, and returns
-// right away with no window open.
-func (h *Host) Run() error {
-	if h.c == nil {
-		return nil
+// run is Run. bui.Flush runs before the loop what was queued and what waits for a kit call
+// to return, as package bui's Run does, and again after it, for a handler that closed
+// something and quit. A wake sent before SetWake was lost, but the first Flush does its
+// work.
+func (h *host) run() error {
+	if !h.Supported() {
+		return bui.ErrNoDisplay
 	}
 
-	h.quit = false
+	if h.running {
+		panic("x11: Run called from inside Run")
+	}
+
+	h.running = true
+	bui.SetWake(h.Wake)
+
+	defer func() {
+		bui.SetWake(nil)
+
+		h.running, h.looping, h.quit = false, false, false
+	}()
+
+	bui.Flush()
+
+	h.looping = true
 
 	for h.open > 0 && !h.quit && !h.lost {
 		h.turn()
 	}
 
+	h.looping = false
+
+	bui.Flush()
+
 	if h.lost {
-		return engine.ErrDisplayLost
+		return bui.ErrDisplayLost
 	}
 
 	return nil
 }
 
 // turn is one pass of the loop: wait, then events, timers and renders.
-func (h *Host) turn() {
+func (h *host) turn() {
 	h.wait()
 
 	for range maxEventsPerTurn {
@@ -71,7 +92,7 @@ func (h *Host) turn() {
 
 // windowsSnapshot is what a pass goes over: a kit call runs handlers, and what they do
 // must not move the list under the iteration.
-func (h *Host) windowsSnapshot() []*window {
+func (h *host) windowsSnapshot() []*window {
 	return append([]*window(nil), h.windows...)
 }
 
@@ -80,8 +101,8 @@ func (h *Host) windowsSnapshot() []*window {
 // host only reads its pipe when it would block, so an animation starves Do.
 //
 // The queue is looked at rather than trusted to signal: notify holds one signal, which
-// a burst shares and which peek and waitFor can consume.
-func (h *Host) wait() {
+// a burst shares and which a paste's waitFor can consume.
+func (h *host) wait() {
 	wait, forever := h.nextWait(time.Now())
 
 	if h.events.hasWork() {
@@ -116,7 +137,7 @@ func (h *Host) wait() {
 }
 
 // nextWait returns how long nothing is due, or forever.
-func (h *Host) nextWait(now time.Time) (wait time.Duration, forever bool) {
+func (h *host) nextWait(now time.Time) (wait time.Duration, forever bool) {
 	forever = true
 
 	note := func(d time.Duration) {
@@ -148,7 +169,7 @@ func (h *Host) nextWait(now time.Time) (wait time.Duration, forever bool) {
 
 // renderPending renders what asked for it, unless the last frame's animation has not
 // had its time yet. Unlike the C host's sleep, events and wakes run in the meantime.
-func (h *Host) renderPending(now time.Time) {
+func (h *host) renderPending(now time.Time) {
 	if now.Before(h.frameDue) {
 		return
 	}
@@ -168,25 +189,15 @@ func (h *Host) renderPending(now time.Time) {
 	}
 }
 
-// drainWake is the wake's work: decoded images, then the wake function. It is guarded
-// like a callback from the kit, as this package's loop stands for the kit's: a panic in
-// a Do function running in the loop ends the process, as package bui documents.
-func (h *Host) drainWake() {
-	returned := false
-
-	defer engine.ExitIfUnwinding(&returned)
-
-	h.kit.ImagePoll()
-
-	if h.wakeFunc != nil {
-		h.wakeFunc()
-	}
-
-	returned = true
+// drainWake does a wake's work. bui.Flush runs outside any kit call, so a panic in a
+// function bui.Do queued propagates from Run, as package bui's Run has it before and after
+// its loop.
+func (h *host) drainWake() {
+	h.wakeFunc()
 }
 
 // checkConnection closes every window when the server is gone, so that Run can report it.
-func (h *Host) checkConnection() {
+func (h *host) checkConnection() {
 	if !h.events.isClosed() {
 		return
 	}
@@ -203,7 +214,7 @@ func (h *Host) checkConnection() {
 // handle runs one event.
 //
 //nolint:cyclop // one short case per event type
-func (h *Host) handle(ev xgb.Event) {
+func (h *host) handle(ev xgb.Event) {
 	switch e := ev.(type) {
 	case xproto.SelectionRequestEvent:
 		h.handleSelectionRequest(e)
@@ -224,7 +235,7 @@ func (h *Host) handle(ev xgb.Event) {
 		}
 	case xproto.MotionNotifyEvent:
 		if win := h.findX(e.Event); win != nil {
-			h.kit.Motion(win.ctx, int(e.EventX), int(e.EventY), modsOf(e.State))
+			win.hl.Motion(int(e.EventX), int(e.EventY), modsOf(e.State))
 		}
 	case xproto.LeaveNotifyEvent:
 		if win := h.findX(e.Event); win != nil {
@@ -240,11 +251,7 @@ func (h *Host) handle(ev xgb.Event) {
 		}
 	case xproto.KeyPressEvent:
 		if win := h.findX(e.Event); win != nil {
-			win.handleKey(e.Detail, e.State, true)
-		}
-	case xproto.KeyReleaseEvent:
-		if win := h.findX(e.Event); win != nil && !h.events.isAutorepeat(e) {
-			win.handleKey(e.Detail, e.State, false)
+			win.handleKey(e.Detail, e.State)
 		}
 	case xproto.ClientMessageEvent:
 		if win := h.findX(e.Window); win != nil && e.Data.Data32[0] == uint32(h.atoms.delete) {
@@ -255,7 +262,7 @@ func (h *Host) handle(ev xgb.Event) {
 
 // handleMapping reads the keymap again after a layout change. The C host never does, so
 // its windows keep the keymap they started with until XLookupString refreshes it.
-func (h *Host) handleMapping() {
+func (h *host) handleMapping() {
 	kb, err := newKeyboard(h.c, h.keyboard.opcode)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bui: cannot read the new keymap: %v\n", err)
@@ -280,21 +287,21 @@ func (win *window) handleLeave(e xproto.LeaveNotifyEvent) {
 	const held = xproto.KeyButMaskButton1 | xproto.KeyButMaskButton2 | xproto.KeyButMaskButton3
 
 	if e.State&held == 0 {
-		win.host.kit.Motion(win.ctx, outside, outside, 0)
+		win.hl.Motion(outside, outside, 0)
 	}
 }
 
-func modsOf(state uint16) int {
-	m := 0
+func modsOf(state uint16) bui.Mod {
+	var m bui.Mod
 
 	for _, b := range []struct {
 		state uint16
-		mod   int
+		mod   bui.Mod
 	}{
-		{xproto.KeyButMaskShift, engine.ModShift},
-		{xproto.KeyButMaskControl, engine.ModCtrl},
-		{xproto.KeyButMaskMod1, engine.ModAlt},
-		{xproto.KeyButMaskButton1, engine.ModButton1},
+		{xproto.KeyButMaskShift, bui.ModShift},
+		{xproto.KeyButMaskControl, bui.ModCtrl},
+		{xproto.KeyButMaskMod1, bui.ModAlt},
+		{xproto.KeyButMaskButton1, bui.ModButton1},
 	} {
 		if state&b.state != 0 {
 			m |= b.mod
@@ -315,52 +322,42 @@ const (
 	buttonTiltRight = 7
 )
 
+// handlePress forwards what bui.Headless takes. The middle button reaches only "events"
+// nodes in the kit, which package bui has no handler for, so it is not sent.
 func (win *window) handlePress(e xproto.ButtonPressEvent) {
-	k, x, y := win.host.kit, int(e.EventX), int(e.EventY)
+	hl, x, y := win.hl, int(e.EventX), int(e.EventY)
 	mods := modsOf(e.State)
-	noButton := mods &^ engine.ModButton1
+	noButton := mods &^ bui.ModButton1
 
 	switch e.Detail {
 	case buttonLeft:
 		xproto.SetInputFocus(win.host.c, xproto.InputFocusParent, win.xid, xproto.TimeCurrentTime)
-		k.PressMods(win.ctx, x, y, mods|engine.ModButton1)
-	case buttonMiddle:
-		k.Button(win.ctx, x, y, buttonMiddle, false, mods)
+		hl.PressMods(x, y, mods)
 	case buttonRight:
-		k.ContextMenu(win.ctx, x, y, mods)
+		hl.ContextMenu(x, y, mods)
 	case buttonWheelUp:
-		k.Scroll(win.ctx, x, y, 0, 1, noButton)
+		hl.Scroll(x, y, 0, 1, noButton)
 	case buttonWheelDown:
-		k.Scroll(win.ctx, x, y, 0, -1, noButton)
+		hl.Scroll(x, y, 0, -1, noButton)
 	case buttonTiltLeft:
-		k.Scroll(win.ctx, x, y, -1, 0, noButton)
+		hl.Scroll(x, y, -1, 0, noButton)
 	case buttonTiltRight:
-		k.Scroll(win.ctx, x, y, 1, 0, noButton)
+		hl.Scroll(x, y, 1, 0, noButton)
 	}
 }
 
+// handleRelease forwards the left button. The others reach only "events" nodes.
 func (win *window) handleRelease(e xproto.ButtonReleaseEvent) {
-	k, x, y := win.host.kit, int(e.EventX), int(e.EventY)
-	mods := modsOf(e.State) &^ engine.ModButton1
-
-	switch e.Detail {
-	case buttonLeft:
-		k.ReleaseMods(win.ctx, x, y, mods)
-	case buttonMiddle, buttonRight:
-		k.Button(win.ctx, x, y, int(e.Detail), true, mods)
+	if e.Detail == buttonLeft {
+		win.hl.ReleaseMods(int(e.EventX), int(e.EventY), modsOf(e.State))
 	}
 }
 
-// handleKey passes control characters on as a keysym only, as they are not text.
-func (win *window) handleKey(code xproto.Keycode, state uint16, press bool) {
+// handleKey forwards a key press. Control characters go on as a keysym only, as they are
+// not text. Releases reach only "events" nodes in the kit, so the window asks for none.
+func (win *window) handleKey(code xproto.Keycode, state uint16) {
 	sym := win.host.keyboard.lookup(byte(code), state)
 	name, mods := keysymName(sym), modsOf(state)
-
-	if !press {
-		win.host.kit.KeyRelease(win.ctx, name, mods)
-
-		return
-	}
 
 	const (
 		firstPrintable = 0x20
@@ -368,9 +365,9 @@ func (win *window) handleKey(code xproto.Keycode, state uint16, press bool) {
 	)
 
 	text := keysymText(sym)
-	if text != "" && (text[0] < firstPrintable || text[0] == del || mods&engine.ModCtrl != 0) {
+	if text != "" && (text[0] < firstPrintable || text[0] == del || mods&bui.ModCtrl != 0) {
 		text = ""
 	}
 
-	win.host.kit.Key(win.ctx, text, name, mods)
+	win.hl.Key(text, name, mods)
 }

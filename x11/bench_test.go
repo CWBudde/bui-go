@@ -5,7 +5,7 @@ package x11
 import (
 	"testing"
 
-	"github.com/CWBudde/bui-go/internal/engine/wasmengine"
+	bui "github.com/CWBudde/bui-go"
 	"github.com/jezek/xgb/xproto"
 )
 
@@ -13,10 +13,7 @@ import (
 func benchmarkPresent(b *testing.B, width, height int) {
 	b.Helper()
 
-	k := wasmengine.Kit{}
-	k.SetEmit(func(uint32, int, float64) {})
-
-	h := New(k)
+	h := newHost()
 	if !h.Supported() {
 		b.Skip("no display")
 	}
@@ -24,18 +21,19 @@ func benchmarkPresent(b *testing.B, width, height int) {
 	defer h.c.Close()
 
 	h.scale = 1
-	root := k.NodeNew("frame")
-	ctx := k.ContextNew(root)
-	k.ContextSetEmitHost(ctx)
+	root := bui.NewNode("frame")
 
-	win := h.find(h.WindowNew(ctx, "bui x11 bench", width, height))
-	h.WindowShow(win.id)
+	win, err := h.newWindow(root, "bui x11 bench", width, height)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	win.show()
 	win.render()
 
 	b.Cleanup(func() {
-		h.WindowFree(win.id)
-		k.ContextFree(ctx)
-		k.NodeFree(root)
+		win.free()
+		root.Close()
 	})
 
 	for b.Loop() {

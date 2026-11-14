@@ -35,7 +35,7 @@ jobs:
         run: CC=gcc LSAN_OPTIONS=suppressions=$PWD/scripts/lsan.supp xvfb-run -a go test -asan -ldflags='-s=false -w=false' ./...
 
       - name: Send real input
-        run: BUI_TEST_XDOTOOL=1 xvfb-run -a go test -race -run '^TestX' .
+        run: BUI_TEST_XDOTOOL=1 xvfb-run -a go test -race -run '^TestX' . ./x11/
 
   wasm:
     name: wasm engine
@@ -57,7 +57,7 @@ jobs:
         run: CGO_ENABLED=0 xvfb-run -a go test ./...
 
       - name: Send real input
-        run: BUI_TEST_XDOTOOL=1 xvfb-run -a go test -race -tags bui_nocgo -run '^TestX' .
+        run: BUI_TEST_XDOTOOL=1 xvfb-run -a go test -race -tags bui_nocgo -run '^TestX' ./x11/
 
   # With cgo on, these must select the wasm engine and link: only Linux amd64 has
   # native libraries.

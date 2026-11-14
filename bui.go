@@ -2,15 +2,16 @@
 
 // Package bui is a Go binding to BUI's C kit, which provides Blender's UI widgets.
 //
-// Engines: on Linux amd64 with cgo it calls the kit natively. Everywhere else, and with
-// the build tag bui_nocgo, it runs the kit as an embedded WebAssembly module with no cgo:
-// with a real window on Linux through X11, a window without input on macOS, and headless on
-// other systems, where NewWindow and Run report ErrNoDisplay. The API is the same, and the
-// tests hold both engines to the same pixels. Text typed on a real window can differ: the
-// wasm engine's X11 host always
-// delivers UTF-8, while the native one gets non-ASCII keys in the C locale's encoding, as
-// nothing sets the locale. The README has the limits of each engine, and this project's
-// reading of what the wasm engine means for a binary's licence.
+// Engines: on Linux amd64 with cgo it calls the kit natively, and NewWindow opens the kit's
+// own windows. Everywhere else, and with the build tag bui_nocgo, it runs the kit as an
+// embedded WebAssembly module with no cgo: with a Cocoa window on macOS, and headless on
+// other systems, where NewWindow and Run report ErrNoDisplay. On Linux, package
+// github.com/CWBudde/bui-go/x11 opens windows in pure Go on either engine, through
+// Headless. The API is the same, and the tests hold both engines to the same pixels. Text
+// typed on a real window can differ: package x11 always delivers UTF-8, while the kit's own
+// X11 windows get non-ASCII keys in the C locale's encoding, as nothing sets the locale. The
+// README has the limits of each engine, and this project's reading of what the wasm engine
+// means for a binary's licence.
 //
 // Threading: Run must be called from the main goroutine, and all kit-touching
 // API is UI-thread only, meaning the main goroutine before and after Run, and
