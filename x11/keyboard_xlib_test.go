@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CWBudde/bui-go/internal/host/x11/xlibref"
+	"github.com/CWBudde/bui-go/x11/internal/xlibref"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 )

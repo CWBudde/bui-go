@@ -6,7 +6,7 @@ package bui
 
 import (
 	"github.com/CWBudde/bui-go/internal/engine"
-	"github.com/CWBudde/bui-go/internal/host/x11"
+	"github.com/CWBudde/bui-go/x11"
 )
 
 var host engine.Host = x11.New(kit)
