@@ -41,7 +41,7 @@ package bui                  public API; owns emitDepth, deferred frees, the Do 
   internal/engine/cgoengine  //go:build cgo && linux && amd64; the C calls, bridge.c, bridge.h
   internal/engine/wasmengine no constraint: pure Go; embeds bui_kit.wasm; wazero setup and marshalling
   internal/enginetest        shared conformance suite; its golden test links both engines into one test binary
-  internal/host/x11          Go port of kit_window_x11.c
+x11/                         Go port of kit_window_x11.c, on package bui's public API only
 wasm/                        repo-owned C: shim.c (exports, BKHost trampolines), compat.c (libc gaps)
 ```
 
@@ -320,8 +320,9 @@ run passes `-ldflags='-s=false -w=false'`. The allocation tests skip under `-asa
 ### Failure paths
 
 `TestPanicAcrossCFramesExits` passes with `-tags bui_nocgo`, with panic and `Goexit`. `TestKitFatalPathsExit` covers traps, also
-from inside a handler. `internal/host/x11` covers a panic in a `Do` function in the loop, and a broken connection, which closes every
-window and makes `Run` return `ErrDisplayLost`. On the native engine Xlib's default handler ends the process instead.
+from inside a handler. Package `x11` covers a panic in a `Do` function in its loop, which propagates from `x11.Run`, and a broken
+connection, which closes every window and makes `x11.Run` return `ErrDisplayLost`. The kit's own X11 windows, with cgo, leave
+that to Xlib's default handler, which ends the process.
 
 ## A window of the program's own
 
@@ -347,8 +348,7 @@ that `Headless` lacked:
 - **The scale.** `BK_set_scale` holds one scale for the process. The Cocoa host selects each window's scale before every call for
   that window, and calls `NodeRelayout` on the root when the scale changes, as sizes measured before stay until then.
   `Headless.SetScale` does both for a `Headless`. One that never called it leaves the scale alone, so nothing changes for
-  existing programs. The X11 host sets one scale for the process when it opens a window, so a `Headless` with a scale of its own
-  changes what such a window draws at, until that host moves onto `SetScale`.
+  existing programs. Package `x11` gives each window's `Headless` the display's scale.
 - **The pixels without a full copy.** Both hosts present from `RasterView`, the kit's words as B, G, R and a top byte that holds
   nothing, without copying. `Image` copies the raster twice and converts it to RGBA. `CopyBGRA` copies one rectangle once and sets
   the fourth byte to 255. For a 1920x1080 frame into a reused buffer on the i7-1255U, it took 1.3 to 1.5 ms on either engine and
@@ -358,7 +358,26 @@ that `Headless` lacked:
 
 ## The X11 host
 
-`internal/host/x11` is a Go port of `kit_window_x11.c` on `jezek/xgb`.
+Package `x11` is a Go port of `kit_window_x11.c` on `jezek/xgb`. It was package `bui`'s host, behind `engine.Host`, until
+2026-11-14. Now it imports package `bui` and nothing under `internal/`, which `TestImportsOnlyThePublicAPI` checks, so that it can
+stay in bui-go as the hosts module once the binding is upstream as `bindings/go`. Moving it changed this:
+
+- **Each window is a `Headless`,** made on the root with `SetScale` at the display's scale, with the window as its `bui.Host`.
+  Input goes to the `Headless` calls, and frames come from `RenderDamage`. Package `bui` no longer imports the host, so on Linux
+  without cgo its `NewWindow` and `Run` report `ErrNoDisplay`, as on Windows. With cgo they still open the kit's own windows.
+- **The middle button and key releases are not sent.** They reach only "events" nodes in the kit, which package `bui` has no
+  handler for, and `Headless` has no call for them. The window no longer asks the server for key releases, which also retires the
+  peek that told an autorepeat's release from a real one.
+- **The loop's wake runs `bui.Flush`,** which `bui.SetWake` triggers. `Run` flushes before and after the loop, as `bui.Run` does,
+  and a quit outside the loop holds until the next `Run` ends, so a `Do(x11.Quit)` queued before `Run` counts. A panic in a `Do`
+  function propagates from `Run`: no kit frame is on the stack, and the package can no longer reach `engine.ExitIfUnwinding`.
+- **Presenting copies once.** The view of the raster is not public, so each request's rows come from `CopyBGRA` into one reused
+  buffer. Interleaved with the old code on the wasm engine, under a load average of about 24, a full 1920x1080 frame took 11.0 to
+  15.5 ms against 9.7 to 12.1 ms, and a 400x300 one 1.3 to 1.7 ms against 0.9 to 1.25 ms (`BenchmarkPresent*`, 200 and 300
+  iterations, round trip included). Damage keeps most frames small.
+- **Windows of different scales share the process.** Each `Headless` selects its own before each kit call.
+
+From the port of the C host:
 
 - **The keyboard speaks just enough XKB.** xgb has no XKB package, so `keyboard_xkb.go` writes out `UseExtension` and `GetMap`.
   Both are needed: without `UseExtension` the server reports group 2 as Mod5, the same bit as AltGr, and only `GetMap` tells which
@@ -366,7 +385,7 @@ that `Headless` lacked:
   keymap and its protocol rules, which only the unit tests exercise.
 - **Keysyms match libX11.** On every keycode under 18 modifier and group states, on us, de, de nodeadkeys, fr, ru, gr, dvorak,
   us+ru, de+gr, ru+us, us+de, de+us and us+ru+de, the one difference is a deliberate one: Shift+Caps on `µ` gives the real keysym
-  where Xlib's case conversion gives one that names nothing (`go test -tags bui_xlibref ./internal/host/x11/`).
+  where Xlib's case conversion gives one that names nothing (`go test -tags bui_xlibref ./x11/`).
 - **A dead key types its spacing character,** as Xlib's text does. There is no Compose, as in C.
 - **Text is always UTF-8.** The C host's `XLookupString` answers in the locale's encoding, and nothing calls `setlocale`, so typing
   `ä` natively gives a Latin-1 byte. That is a bug of the C path, not fixed here.
