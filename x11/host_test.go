@@ -5,6 +5,7 @@ package x11
 import (
 	"bufio"
 	"errors"
+	"math"
 	"os"
 	"os/exec"
 	"runtime"
@@ -13,8 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CWBudde/bui-go/internal/engine"
-	"github.com/CWBudde/bui-go/internal/engine/wasmengine"
+	bui "github.com/CWBudde/bui-go"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 	"github.com/jezek/xgb/xtest"
@@ -41,7 +41,7 @@ func TestMain(m *testing.M) {
 // it otherwise resets when its last client goes, and a connection during that fails.
 func startXvfb() (stop func()) {
 	path, err := exec.LookPath("Xvfb")
-	if err != nil || os.Getenv(childEnv) != "" {
+	if err != nil {
 		return func() {}
 	}
 
@@ -96,29 +96,22 @@ func requirePrivateDisplay(t *testing.T) {
 	}
 }
 
-// fixture is a host on the process's wasm kit with one window on a tree that fills it.
-// Input arrives through handle, as real X events do, so these tests work on any display
-// without touching its pointer or keyboard.
+// fixture is a host with one window on a tree whose child fills it. Input arrives through
+// handle, as real X events do, so these tests work on any display without touching its
+// pointer or keyboard.
 type fixture struct {
 	t     *testing.T
-	h     *Host
-	k     engine.Kit
-	root  engine.Node
-	child engine.Node
-	ctx   engine.Context
-	win   engine.Window
+	h     *host
+	root  *bui.Node
+	child *bui.Node
 	w     *window
 }
 
-// newHost returns a host, or skips with no display. The process's kit has one emit
-// receiver, which a test may set through emit.
-func newHost(t *testing.T) *Host {
+// testHost returns a host of its own, or skips with no display.
+func testHost(t *testing.T) *host {
 	t.Helper()
 
-	k := wasmengine.Kit{}
-	k.SetEmit(func(uint32, int, float64) {})
-
-	h := New(k)
+	h := newHost()
 	if !h.Supported() {
 		t.Skip("no display")
 	}
@@ -131,7 +124,7 @@ func newHost(t *testing.T) *Host {
 func newFixture(t *testing.T, typ string, width, height int) *fixture {
 	t.Helper()
 
-	f := &fixture{t: t, h: newHost(t), k: wasmengine.Kit{}}
+	f := &fixture{t: t, h: testHost(t)}
 	f.h.scale = 1
 
 	f.open(typ, width, height)
@@ -142,44 +135,49 @@ func newFixture(t *testing.T, typ string, width, height int) *fixture {
 func (f *fixture) open(typ string, width, height int) {
 	f.t.Helper()
 
-	k := f.k
-	f.root, f.child = k.NodeNew("frame"), k.NodeNew(typ)
+	f.root, f.child = bui.NewNode("frame"), bui.NewNode(typ)
+	f.root.Add(f.child)
+	f.child.Pack(bui.PackOptions{Fill: bui.FillBoth, Expand: true})
 
-	if f.root == 0 || f.child == 0 {
-		f.t.Fatalf("cannot create a %s", typ)
+	win, err := f.h.newWindow(f.root, "bui x11 test", width, height)
+	if err != nil {
+		f.t.Fatalf("newWindow: %v", err)
 	}
 
-	k.NodeSetID(f.child, 1)
-	k.NodeAdd(f.root, f.child)
-	k.GeomSetPack(f.child)
-	k.GeomSet(f.child, "fill", 3)
-	k.GeomSet(f.child, "expand", 1)
+	f.w = win
 
-	f.ctx = k.ContextNew(f.root)
-	k.ContextSetEmitHost(f.ctx)
-
-	f.win = f.h.WindowNew(f.ctx, "bui x11 test", width, height)
-	if f.win == 0 {
-		f.t.Fatal("WindowNew failed")
-	}
-
-	f.w = f.h.find(f.win)
-
-	// As package bui requires: window, context, then the tree, whose child has an id.
-	root, child, ctx, win := f.root, f.child, f.ctx, f.win
+	// As package bui requires: the window, then the tree.
+	root := f.root
 
 	f.t.Cleanup(func() {
-		f.h.WindowFree(win)
-		k.ContextFree(ctx)
-		k.NodeFree(child)
-		k.NodeFree(root)
+		if !win.freed {
+			win.free()
+		}
+
+		root.Close()
+	})
+}
+
+// clickNode presses and releases the left button over n, rendering first if n has no
+// size yet.
+func clickNode(win *window, n *bui.Node) {
+	if _, _, w, _ := n.Rect(); w <= 0 {
+		win.render()
+	}
+
+	x, y, w, h := n.Rect()
+	cx, cy := int16(x+w/2), int16(y+h/2)
+
+	win.host.handle(xproto.ButtonPressEvent{Event: win.xid, Detail: buttonLeft, EventX: cx, EventY: cy})
+	win.host.handle(xproto.ButtonReleaseEvent{
+		Event: win.xid, Detail: buttonLeft, EventX: cx, EventY: cy, State: xproto.KeyButMaskButton1,
 	})
 }
 
 // show maps the window and waits for its first frame.
 func (f *fixture) show() {
 	f.t.Helper()
-	f.h.WindowShow(f.win)
+	f.w.show()
 	f.pump(func() bool { return f.w.rasterW == f.w.w && f.mapped() && !f.w.renderPending })
 }
 
@@ -275,9 +273,12 @@ func (f *fixture) checkPresented(what string) []uint32 {
 	f.t.Helper()
 	f.settle()
 
-	want := f.k.RasterPixels(f.w.raster)
-	for i, p := range want {
-		want[i] = p & 0xffffff
+	img := f.w.hl.Image()
+
+	want := make([]uint32, len(img.Pix)/4)
+	for i := range want {
+		r, g, b := img.Pix[4*i], img.Pix[4*i+1], img.Pix[4*i+2]
+		want[i] = uint32(r)<<16 | uint32(g)<<8 | uint32(b)
 	}
 
 	got := f.onScreen()
@@ -298,7 +299,7 @@ func (f *fixture) checkPresented(what string) []uint32 {
 func (f *fixture) center() (x, y int16) {
 	f.t.Helper()
 
-	nx, ny, w, h := f.k.NodeRect(f.child)
+	nx, ny, w, h := f.child.Rect()
 	if w <= 0 || h <= 0 {
 		f.t.Fatalf("node has no size: %d x %d", w, h)
 	}
@@ -344,7 +345,7 @@ func (f *fixture) key(sym uint32) {
 
 func TestPresentMatchesTheRaster(t *testing.T) {
 	f := newFixture(t, "button", 300, 100)
-	f.k.SetStr(f.child, "text", "Hover me")
+	mustDo(t, f.child.SetStr("text", "Hover me"))
 	f.show()
 
 	before := f.checkPresented("the first frame")
@@ -357,7 +358,7 @@ func TestPresentMatchesTheRaster(t *testing.T) {
 		t.Error("hovering changed nothing on screen")
 	}
 
-	if damage := f.k.RasterDamage(f.w.raster); len(damage) == 0 {
+	if len(f.w.damage) == 0 {
 		t.Error("the hover drew no damage")
 	}
 
@@ -371,7 +372,7 @@ func TestPresentMatchesTheRaster(t *testing.T) {
 // A frame this size takes many requests, past the server's limit for one.
 func TestPresentSplitsLargeFrames(t *testing.T) {
 	f := newFixture(t, "button", 800, 600)
-	f.k.SetStr(f.child, "text", "A large frame")
+	mustDo(t, f.child.SetStr("text", "A large frame"))
 	f.show()
 
 	if 4*f.w.w*f.w.h <= f.h.maxData {
@@ -385,7 +386,7 @@ func TestPresentSplitsLargeFrames(t *testing.T) {
 // Such rows go out in columns. This one takes 64 pixels a request.
 func TestPresentSplitsWideRows(t *testing.T) {
 	f := newFixture(t, "button", 300, 100)
-	f.k.SetStr(f.child, "text", "Hover me")
+	mustDo(t, f.child.SetStr("text", "Hover me"))
 	f.h.maxData = 4 * 64
 	f.show()
 
@@ -427,7 +428,7 @@ func TestResize(t *testing.T) {
 	f.pump(func() bool { return f.w.w == 350 && f.w.h == 120 && !f.w.renderPending })
 	f.checkPresented("the resized frame")
 
-	if _, _, w, h := f.k.NodeRect(f.child); w != 350 || h != 120 {
+	if _, _, w, h := f.child.Rect(); w != 350 || h != 120 {
 		t.Errorf("the node is %d x %d after the resize", w, h)
 	}
 
@@ -439,12 +440,10 @@ func TestResize(t *testing.T) {
 }
 
 func TestScaleSizesTheWindow(t *testing.T) {
-	h := newHost(t)
+	h := testHost(t)
 	h.scale = 2
 
-	defer wasmengine.Kit{}.SetScale(1)
-
-	f := &fixture{t: t, h: h, k: wasmengine.Kit{}}
+	f := &fixture{t: t, h: h}
 	f.open("button", 100, 50)
 
 	if f.w.w != 200 || f.w.h != 100 {
@@ -493,12 +492,7 @@ func TestClickReachesTheKit(t *testing.T) {
 
 	clicks := 0
 
-	f.k.SetEmit(func(id uint32, kind int, _ float64) {
-		if id == 1 && kind == engine.EvClick {
-			clicks++
-		}
-	})
-	defer f.k.SetEmit(func(uint32, int, float64) {})
+	f.child.OnClick(func() { clicks++ })
 
 	f.show()
 
@@ -524,9 +518,9 @@ func TestClickReachesTheKit(t *testing.T) {
 
 func TestSliderDragAndWheelEvents(t *testing.T) {
 	f := newFixture(t, "slider", 300, 40)
-	f.k.SetNum(f.child, "min", 0)
-	f.k.SetNum(f.child, "max", 100)
-	f.k.SetNum(f.child, "value", 50)
+	mustDo(t, f.child.SetNum("min", 0))
+	mustDo(t, f.child.SetNum("max", 100))
+	mustDo(t, f.child.SetNum("value", 50))
 	f.show()
 
 	x, y := f.center()
@@ -535,18 +529,18 @@ func TestSliderDragAndWheelEvents(t *testing.T) {
 	// The wheel with Ctrl steps a value, in both directions.
 	f.press(buttonWheelUp, x, y, xproto.KeyButMaskControl)
 
-	up := f.k.GetNum(f.child, "value")
+	up := f.child.Num("value")
 	if up <= 50 {
 		t.Errorf("wheel up gave %v", up)
 	}
 
 	f.press(buttonWheelDown, x, y, xproto.KeyButMaskControl)
 
-	if v := f.k.GetNum(f.child, "value"); v >= up {
+	if v := f.child.Num("value"); v >= up {
 		t.Errorf("wheel down gave %v, from %v", v, up)
 	}
 
-	before := f.k.GetNum(f.child, "value")
+	before := f.child.Num("value")
 
 	f.press(buttonLeft, x, y, 0)
 	f.motion(x+40, y, xproto.KeyButMaskButton1)
@@ -556,7 +550,7 @@ func TestSliderDragAndWheelEvents(t *testing.T) {
 	f.motion(x+60, y, xproto.KeyButMaskButton1)
 	f.release(buttonLeft, x+60, y, xproto.KeyButMaskButton1)
 
-	if v := f.k.GetNum(f.child, "value"); v <= before {
+	if v := f.child.Num("value"); v <= before {
 		t.Errorf("dragging right went from %v to %v", before, v)
 	}
 
@@ -585,7 +579,7 @@ func TestTypingReachesATextField(t *testing.T) {
 	f.h.handle(xproto.KeyPressEvent{Event: f.w.xid, Detail: code, State: xproto.KeyButMaskControl})
 	f.key(xkReturn)
 
-	if got := f.k.GetStr(f.child, "text"); got != "ac" {
+	if got := f.child.Str("text"); got != "ac" {
 		t.Errorf("typed %q", got)
 	}
 
@@ -595,50 +589,19 @@ func TestTypingReachesATextField(t *testing.T) {
 func TestModifierBits(t *testing.T) {
 	for _, tc := range []struct {
 		state uint16
-		want  int
+		want  bui.Mod
 	}{
 		{0, 0},
-		{xproto.KeyButMaskShift, engine.ModShift},
-		{xproto.KeyButMaskControl, engine.ModCtrl},
-		{xproto.KeyButMaskMod1, engine.ModAlt},
-		{xproto.KeyButMaskButton1, engine.ModButton1},
+		{xproto.KeyButMaskShift, bui.ModShift},
+		{xproto.KeyButMaskControl, bui.ModCtrl},
+		{xproto.KeyButMaskMod1, bui.ModAlt},
+		{xproto.KeyButMaskButton1, bui.ModButton1},
 		{xproto.KeyButMaskMod5 | xproto.KeyButMaskLock | xproto.KeyButMaskMod2, 0},
-		{xproto.KeyButMaskShift | xproto.KeyButMaskButton1, engine.ModShift | engine.ModButton1},
+		{xproto.KeyButMaskShift | xproto.KeyButMaskButton1, bui.ModShift | bui.ModButton1},
 	} {
 		if got := modsOf(tc.state); got != tc.want {
 			t.Errorf("modsOf(%#x) = %d, want %d", tc.state, got, tc.want)
 		}
-	}
-}
-
-func TestAutorepeatIsNotARelease(t *testing.T) {
-	q := &eventQueue{notify: make(chan struct{}, 1)}
-	release := xproto.KeyReleaseEvent{Detail: 10, Time: 5}
-
-	q.push(xproto.KeyPressEvent{Detail: 10, Time: 5})
-
-	if !q.isAutorepeat(release) {
-		t.Error("a press right after it, same key and time, is autorepeat")
-	}
-
-	q.pop()
-	q.push(xproto.KeyPressEvent{Detail: 10, Time: 6})
-
-	if q.isAutorepeat(release) {
-		t.Error("a press at a later time is a new press")
-	}
-
-	q.pop()
-	q.push(xproto.KeyPressEvent{Detail: 11, Time: 5})
-
-	if q.isAutorepeat(release) {
-		t.Error("another key is no autorepeat")
-	}
-
-	q.pop()
-
-	if q.isAutorepeat(release) {
-		t.Error("with nothing queued it is a release")
 	}
 }
 
@@ -648,7 +611,7 @@ func TestCursors(t *testing.T) {
 
 	// Past either end clamps: the kit's BK_CURSOR_PROGRESS is 12.
 	for c := -1; c <= cursorCount+1; c++ {
-		f.w.SetCursor(c)
+		f.w.SetCursor(bui.Cursor(c))
 	}
 
 	f.sync()
@@ -689,7 +652,7 @@ func TestHostCallsAfterCloseAreIgnored(t *testing.T) {
 	f.show()
 
 	f.w.close()
-	f.w.Request()
+	f.w.Redraw()
 	f.w.SetCursor(1)
 	f.w.Warp(1, 1)
 	f.w.ClipboardSet("x")
@@ -707,8 +670,8 @@ func TestHostCallsAfterCloseAreIgnored(t *testing.T) {
 
 func TestTooltipTimerFiresInTheLoop(t *testing.T) {
 	f := newFixture(t, "button", 300, 200)
-	f.k.SetStr(f.child, "text", "Hover me")
-	f.k.SetStr(f.child, "description", "A tooltip")
+	mustDo(t, f.child.SetStr("text", "Hover me"))
+	mustDo(t, f.child.SetStr("description", "A tooltip"))
 	f.show()
 
 	x, y := f.center()
@@ -1196,8 +1159,29 @@ func TestResourceDPI(t *testing.T) {
 	}
 }
 
+// What Headless.SetScale takes: positive and finite as a float32, which an Xft.dpi of
+// "inf" or 1e300 is not.
+func TestScaleOf(t *testing.T) {
+	for _, tc := range []struct {
+		v  float64
+		ok bool
+	}{
+		{1, true},
+		{2.5, true},
+		{0, false},
+		{-1, false},
+		{math.Inf(1), false},
+		{1e300, false},
+		{math.NaN(), false},
+	} {
+		if _, ok := scaleOf(tc.v); ok != tc.ok {
+			t.Errorf("scaleOf(%v) ok = %v, want %v", tc.v, ok, tc.ok)
+		}
+	}
+}
+
 func TestDisplayScaleEnvironment(t *testing.T) {
-	h := newHost(t)
+	h := testHost(t)
 
 	for _, tc := range []struct {
 		env  string
@@ -1214,10 +1198,10 @@ func TestDisplayScaleEnvironment(t *testing.T) {
 	}
 
 	// Nonsense falls through to the server's answer, at least 1.
-	for _, env := range []string{"0", "-1", "big"} {
+	for _, env := range []string{"0", "-1", "big", "Inf", "+inf", "NaN"} {
 		t.Setenv("BUI_UI_SCALE", env)
 
-		if got := displayScale(h.c, h.root); got < 1 {
+		if got := displayScale(h.c, h.root); !(got >= 1) || math.IsInf(float64(got), 0) {
 			t.Errorf("BUI_UI_SCALE=%s gives %v", env, got)
 		}
 	}
@@ -1261,7 +1245,7 @@ func TestRunEndsWhenTheLastWindowCloses(t *testing.T) {
 }
 
 // runWithTimeout runs the loop, failing rather than hanging if it never returns.
-func runWithTimeout(t *testing.T, h *Host) error {
+func runWithTimeout(t *testing.T, h *host) error {
 	t.Helper()
 
 	timer := time.AfterFunc(5*time.Second, func() {
@@ -1271,7 +1255,7 @@ func runWithTimeout(t *testing.T, h *Host) error {
 	})
 	defer timer.Stop()
 
-	return h.Run()
+	return h.run()
 }
 
 func TestRunWithOneOfTwoWindowsClosed(t *testing.T) {
@@ -1287,11 +1271,11 @@ func TestRunWithOneOfTwoWindowsClosed(t *testing.T) {
 
 	woke := make(chan struct{}, 1)
 
-	f.h.WakeInit(func() {
+	f.h.wakeFunc = func() {
 		woke <- struct{}{}
 
 		f.h.Quit()
-	})
+	}
 	f.h.Wake()
 
 	if err := runWithTimeout(t, f.h); err != nil {
@@ -1311,11 +1295,11 @@ func TestWakeFromAnotherGoroutine(t *testing.T) {
 
 	count := 0
 
-	f.h.WakeInit(func() {
+	f.h.wakeFunc = func() {
 		count++
 
 		f.h.Quit()
-	})
+	}
 
 	go func() {
 		time.Sleep(10 * time.Millisecond)
@@ -1333,7 +1317,7 @@ func TestWakeFromAnotherGoroutine(t *testing.T) {
 
 // A burst of wakes must never block a sender, as Do holds its lock while waking.
 func TestWakeNeverBlocks(t *testing.T) {
-	h := New(wasmengine.Kit{})
+	h := newHost()
 
 	done := make(chan struct{})
 
@@ -1359,7 +1343,7 @@ func TestWakeRunsWhileRendering(t *testing.T) {
 
 	woke := false
 
-	f.h.WakeInit(func() { woke = true })
+	f.h.wakeFunc = func() { woke = true }
 	f.h.Wake()
 	f.w.renderPending = true
 	f.h.frameDue = time.Time{}
@@ -1430,9 +1414,9 @@ func TestSecondLayoutReachesEvents(t *testing.T) {
 	tap(evdevQ)
 	tap(evdevCaps)
 	tap(evdevQ)
-	f.k.Key(f.ctx, "", "Return", 0)
+	f.w.hl.Key("", "Return", 0)
 
-	if got := f.k.GetStr(f.child, "text"); got != "qйq" {
+	if got := f.child.Str("text"); got != "qйq" {
 		t.Errorf("typed %q, want the second layout's letter in the middle", got)
 	}
 }
@@ -1471,69 +1455,28 @@ func TestLayoutChangeReachesTheHost(t *testing.T) {
 func TestSupportedWithoutDisplay(t *testing.T) {
 	t.Setenv("DISPLAY", "")
 
-	h := New(wasmengine.Kit{})
+	h := newHost()
 	if h.Supported() {
 		t.Error("Supported with DISPLAY unset")
 	}
 
-	if win := h.WindowNew(1, "x", 10, 10); win != 0 {
-		t.Errorf("WindowNew = %d", win)
+	root := bui.NewNode("frame")
+	defer root.Close()
+
+	if _, err := h.newWindow(root, "x", 10, 10); !errors.Is(err, bui.ErrNoDisplay) {
+		t.Errorf("newWindow = %v", err)
 	}
 
-	if err := h.Run(); err != nil {
-		t.Errorf("Run = %v", err)
+	// The Headless it made on the way is closed again, so root is free.
+	if win, err := newHost().newWindow(root, "x", 10, 10); win != nil || !errors.Is(err, bui.ErrNoDisplay) {
+		t.Errorf("a second newWindow = %v, %v", win, err)
+	}
+
+	if err := h.run(); !errors.Is(err, bui.ErrNoDisplay) {
+		t.Errorf("run = %v", err)
 	}
 
 	h.Quit()
-}
-
-const childEnv = "BUI_X11_TEST_CHILD"
-
-// TestChildProcess does what ends the process when another test asks for it.
-func TestChildProcess(t *testing.T) {
-	switch os.Getenv(childEnv) {
-	case "":
-		t.Skip("only runs as a subprocess")
-	case "wake-panic":
-		f := newFixture(t, "button", 100, 40)
-		f.h.WakeInit(func() { panic("boom") })
-		f.h.Wake()
-
-		// A recover as a caller might have it must not let the process carry on.
-		func() {
-			defer func() { _ = recover() }()
-
-			_ = f.h.Run()
-		}()
-	}
-
-	t.Fatal("the process survived")
-}
-
-func TestFatalPathsExit(t *testing.T) {
-	for _, tc := range []struct {
-		child string
-		code  int
-	}{
-		{"wake-panic", 2},
-	} {
-		t.Run(tc.child, func(t *testing.T) {
-			if _, err := xgb.NewConn(); err != nil {
-				t.Skip("no display")
-			}
-
-			cmd := exec.Command(os.Args[0], "-test.run=^TestChildProcess$", "-test.count=1")
-
-			cmd.Env = append(os.Environ(), childEnv+"="+tc.child)
-
-			out, err := cmd.CombinedOutput()
-
-			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != tc.code {
-				t.Fatalf("child: %v, want exit status %d\n%s", err, tc.code, out)
-			}
-		})
-	}
 }
 
 // Losing the server ends Run with an error, wherever in the queue the loss shows.
@@ -1544,7 +1487,7 @@ func TestConnectionLostEndsRun(t *testing.T) {
 	}{
 		{"closed", func(f *fixture) { f.h.c.Close() }},
 		{"signal consumed", func(f *fixture) {
-			// Another waiter took the one signal, as a key release's peek can.
+			// Another waiter took the one signal, as a paste's waitFor can.
 			f.settle()
 			f.h.events.close()
 			<-f.h.events.notify
@@ -1560,7 +1503,7 @@ func TestConnectionLostEndsRun(t *testing.T) {
 			f := newFixture(t, "button", 100, 40)
 			tc.lose(f)
 
-			if err := runWithTimeout(t, f.h); !errors.Is(err, engine.ErrDisplayLost) {
+			if err := runWithTimeout(t, f.h); !errors.Is(err, bui.ErrDisplayLost) {
 				t.Errorf("Run = %v", err)
 			}
 
@@ -1572,8 +1515,11 @@ func TestConnectionLostEndsRun(t *testing.T) {
 				t.Error("Supported after the connection broke")
 			}
 
-			if win := f.h.WindowNew(f.ctx, "again", 10, 10); win != 0 {
-				t.Errorf("WindowNew = %d", win)
+			root := bui.NewNode("frame")
+			defer root.Close()
+
+			if _, err := f.h.newWindow(root, "again", 10, 10); !errors.Is(err, bui.ErrNoDisplay) {
+				t.Errorf("newWindow = %v", err)
 			}
 		})
 	}
@@ -1605,7 +1551,7 @@ func TestRunEndsWhenTheWindowIsDestroyed(t *testing.T) {
 
 // Other extensions' numbers must stay as xgb has them: an embedder may use one.
 func TestOnlyXKBsEventIsClaimed(t *testing.T) {
-	newHost(t)
+	testHost(t)
 
 	claimed := 0
 
@@ -1812,5 +1758,14 @@ func TestTurnBoundsItsEvents(t *testing.T) {
 
 	if left != extra {
 		t.Errorf("%d events left, want %d", left, extra)
+	}
+}
+
+// mustDo fails the test on a setter's error.
+func mustDo(t *testing.T, err error) {
+	t.Helper()
+
+	if err != nil {
+		t.Fatal(err)
 	}
 }

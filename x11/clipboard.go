@@ -11,7 +11,7 @@ import (
 	"github.com/jezek/xgb/xproto"
 )
 
-// ClipboardGet implements engine.WindowHost: asks the owner and waits for its answer,
+// ClipboardGet implements bui.Host: asks the owner and waits for its answer,
 // as GHOST_SystemX11::getClipboard does. Other events wait in the queue meanwhile.
 func (win *window) ClipboardGet() (string, bool) {
 	h := win.host
@@ -156,7 +156,7 @@ func (win *window) readSelection(property xproto.Atom) (string, bool) {
 	return string(value), true
 }
 
-// ClipboardSet implements engine.WindowHost.
+// ClipboardSet implements bui.Host.
 func (win *window) ClipboardSet(text string) {
 	h := win.host
 	h.clip, h.hasClip = text, true
@@ -167,7 +167,7 @@ func (win *window) ClipboardSet(text string) {
 }
 
 // handleSelectionRequest answers someone pasting what we copied.
-func (h *Host) handleSelectionRequest(rq xproto.SelectionRequestEvent) {
+func (h *host) handleSelectionRequest(rq xproto.SelectionRequestEvent) {
 	// An obsolete requestor names no property. ICCCM has the owner use the target then.
 	if rq.Property == xproto.AtomNone {
 		rq.Property = rq.Target

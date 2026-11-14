@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-//go:build !linux && !darwin
+//go:build !darwin && !(cgo && linux && amd64 && !bui_nocgo)
 
 package bui
 

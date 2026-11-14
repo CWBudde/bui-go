@@ -1,6 +1,6 @@
 # Plan
 
-Open work for bui-go, as of 2026-11-13. Finished work belongs in `docs/design.md` and the git history, not here.
+Open work for bui-go, as of 2026-11-14. Finished work belongs in `docs/design.md` and the git history, not here.
 
 ## Where we stand
 
@@ -33,6 +33,7 @@ Open work for bui-go, as of 2026-11-13. Finished work belongs in `docs/design.md
 - [bui-go#23](https://github.com/CWBudde/bui-go/pull/23) is merged, so `main`'s `Headless` has the host's side of the embedding
   API. [CWBudde/BUI#5](https://github.com/CWBudde/BUI/pull/5) is merged too, so the fork's `main` (`6954d0c`) carries #21 to #23.
   [bui-go#24](https://github.com/CWBudde/bui-go/pull/24) is merged, with the plan of that run.
+- [bui-go#25](https://github.com/CWBudde/bui-go/pull/25) is merged, so `main`'s `Headless` has `SetScale` and `CopyBGRA`.
 - The three Phase 3 PRs are merged into the fork's `main`, not upstream:
   [CWBudde/BUI#1](https://github.com/CWBudde/BUI/pull/1), [CWBudde/BUI#4](https://github.com/CWBudde/BUI/pull/4) (the X11 host,
   which [CWBudde/BUI#2](https://github.com/CWBudde/BUI/pull/2) had merged into PR 1's branch) and
@@ -243,7 +244,11 @@ decides to open the upstream PRs.
         `TestHeadlessScalesShareAProcess` and `TestHeadlessCopyBGRA` each fail with their part removed, on both engines. "What a
         host outside package bui needs" in `docs/design.md` has the reasons.
   - [ ] Move the X11 host onto `Headless` and `bui.Host`, as a public package, with `NewWindow` and `Run` of its own. Then the same
-        for Cocoa. Package `bui` then keeps no host, as in the fork.
+        for Cocoa. Package `bui` then keeps no host, as in the fork. (2026-11-14) — partial: X11 is package `x11` at the module
+        root, as Christian chose, and imports nothing under `internal/` (`TestImportsOnlyThePublicAPI`). On Linux without cgo,
+        `bui.NewWindow` and `bui.Run` report `ErrNoDisplay`, and `examples/counter` uses `x11` on Linux. Its tests, package
+        `bui`'s window tests and the `TestX*` runs with real input pass on both engines. Cocoa remains, and with it the decision
+        whether cgo's own X11 windows stay behind `bui.NewWindow`.
   - [ ] Carry `SetScale` and `CopyBGRA` into the fork, as fresh commits on its `main`.
 - [x] Carry the embedding API into the fork once it is complete, as fresh commits on the fork's `main`. (2026-11-12) —
       [CWBudde/BUI#5](https://github.com/CWBudde/BUI/pull/5) carries #21 to #23 as fresh commits, with the docs and a changelog

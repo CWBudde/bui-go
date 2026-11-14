@@ -13,6 +13,12 @@ import (
 	bui "github.com/CWBudde/bui-go"
 )
 
+// window is what the example needs of a window, from package x11 or package bui.
+type window interface {
+	Show()
+	Close()
+}
+
 func must(err error) {
 	if err != nil {
 		log.Fatal(err)
@@ -57,7 +63,7 @@ func main() {
 	})
 	size.OnChange(func(v float64) { fmt.Println("step:", v) })
 
-	win, err := bui.NewWindow(root, "BUI from Go", 320, 160)
+	win, err := newWindow(root, "BUI from Go", 320, 160)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -80,10 +86,10 @@ func main() {
 	}()
 
 	if *quitAfter > 0 {
-		time.AfterFunc(*quitAfter, func() { bui.Do(bui.Quit) })
+		time.AfterFunc(*quitAfter, func() { bui.Do(quit) })
 	}
 
-	must(bui.Run())
+	must(run())
 
 	// A tick can still queue a Do after this, but only Run drains the queue, and
 	// it has returned: nothing touches the labels once they are closed.

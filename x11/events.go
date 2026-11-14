@@ -119,34 +119,6 @@ func (q *eventQueue) pop() xgb.Event {
 	return ev
 }
 
-// peek returns the oldest event without removing it, waiting up to wait for one.
-func (q *eventQueue) peek(wait time.Duration) xgb.Event {
-	deadline := time.NewTimer(wait)
-	defer deadline.Stop()
-
-	for {
-		q.mu.Lock()
-
-		var ev xgb.Event
-		if len(q.events) > 0 {
-			ev = q.events[0]
-		}
-
-		closed := q.closed
-		q.mu.Unlock()
-
-		if ev != nil || closed {
-			return ev
-		}
-
-		select {
-		case <-q.notify:
-		case <-deadline.C:
-			return nil
-		}
-	}
-}
-
 // waitFor returns and removes the first event match accepts, waiting up to wait. It
 // leaves the others in order, for the loop to handle afterwards.
 func (q *eventQueue) waitFor(wait time.Duration, match func(xgb.Event) bool) xgb.Event {
@@ -205,16 +177,4 @@ func (q *eventQueue) isClosed() bool {
 	defer q.mu.Unlock()
 
 	return q.closed && len(q.events) == 0
-}
-
-// autorepeatWait is how long a key release waits to see whether a press follows. The
-// server sends the two together, but they reach the queue one at a time.
-const autorepeatWait = 2 * time.Millisecond
-
-// isAutorepeat reports whether a release is half of an autorepeat: a press of the same
-// key at the same time comes straight after it.
-func (q *eventQueue) isAutorepeat(release xproto.KeyReleaseEvent) bool {
-	next, ok := q.peek(autorepeatWait).(xproto.KeyPressEvent)
-
-	return ok && next.Time == release.Time && next.Detail == release.Detail
 }

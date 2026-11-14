@@ -3,9 +3,11 @@
 package x11
 
 import (
+	"image"
+	"slices"
 	"time"
 
-	"github.com/CWBudde/bui-go/internal/engine"
+	bui "github.com/CWBudde/bui-go"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 )
@@ -17,7 +19,7 @@ const (
 	cursorCount = 12
 	// timerCustom is BK_TIMER_CUSTOM, from the kit's internal header: a custom node's
 	// frame. Any other value of a schedule is the tooltip's serial.
-	timerCustom = -1
+	timerCustom bui.Timer = -1
 	// maxWindowSize is what fits X's int16 geometry.
 	maxWindowSize = 32767
 )
@@ -40,23 +42,25 @@ var cursorGlyphs = [cursorCount]uint16{
 	150, // XC_watch
 }
 
-// window is one X window on a kit context. It implements engine.WindowHost, so the kit
-// reaches it through the context.
+// window is one X window showing a bui.Headless. It is the Headless's bui.Host, so the
+// kit reaches it through the Headless.
 type window struct {
-	host   *Host
-	id     engine.Window
-	xid    xproto.Window // 0 once closed
-	gc     xproto.Gcontext
-	ctx    engine.Context
-	raster engine.Raster
+	host *host
+	hl   *bui.Headless
+	xid  xproto.Window // 0 once closed
+	gc   xproto.Gcontext
 
 	w, h          int // the window's size, which is the raster's next size
 	rasterW       int
 	rasterH       int
 	renderPending bool
 	full          bool
+	// damage is what the last render redrew.
+	damage []image.Rectangle
+	// freed says Window.Close ran, which closes the X window and the Headless.
+	freed bool
 
-	tipID             int
+	tipID             bui.Timer
 	tipDue, customDue time.Time
 
 	// late holds this window's pastes that timed out with no answer seen since, oldest
@@ -64,43 +68,46 @@ type window struct {
 	late []lateRequest
 }
 
-var _ engine.WindowHost = (*window)(nil)
+var _ bui.Host = (*window)(nil)
 
 // clampSize makes a logical size a window size: X has neither empty nor huge windows.
 func clampSize(v int, scale float32) int {
 	return min(max(int(float32(v)*scale), 1), maxWindowSize)
 }
 
-// WindowNew implements engine.Host.
-func (h *Host) WindowNew(ctx engine.Context, title string, width, height int) engine.Window {
+// newWindow is NewWindow. The Headless comes first, so that its checks of root hold with
+// or without a display, as in bui.NewWindow.
+func (h *host) newWindow(root *bui.Node, title string, width, height int) (*window, error) {
+	hl := bui.NewHeadless(root, 1, 1)
+
 	if !h.Supported() {
-		return 0
+		hl.Close()
+
+		return nil, bui.ErrNoDisplay
 	}
 
-	h.kit.SetScale(h.scale)
-
 	win := &window{
-		host: h,
-		ctx:  ctx,
-		w:    clampSize(width, h.scale),
-		h:    clampSize(height, h.scale),
+		host:    h,
+		hl:      hl,
+		w:       clampSize(width, h.scale),
+		h:       clampSize(height, h.scale),
+		rasterW: 1,
+		rasterH: 1,
 	}
 
 	if !win.create(title) {
-		return 0
+		hl.Close()
+
+		return nil, bui.ErrNoDisplay
 	}
 
-	win.raster = h.kit.RasterNew(1, 1)
-	win.rasterW, win.rasterH = 1, 1
+	hl.SetScale(float64(h.scale))
+	hl.SetHost(win)
 
-	h.lastID++
-	win.id = h.lastID
 	h.windows = append(h.windows, win)
 	h.open++
 
-	h.kit.ContextSetWindowHost(ctx, win)
-
-	return win.id
+	return win, nil
 }
 
 // create makes the X window. A request that fails only reports later, so this one is
@@ -121,7 +128,7 @@ func (win *window) create(title string) bool {
 
 	const eventMask = xproto.EventMaskExposure | xproto.EventMaskStructureNotify |
 		xproto.EventMaskPointerMotion | xproto.EventMaskButtonPress | xproto.EventMaskButtonRelease |
-		xproto.EventMaskKeyPress | xproto.EventMaskKeyRelease | xproto.EventMaskLeaveWindow
+		xproto.EventMaskKeyPress | xproto.EventMaskLeaveWindow
 
 	err = xproto.CreateWindowChecked(c, rasterDepth, xid, h.root, 0, 0,
 		uint16(win.w), uint16(win.h), 0, //nolint:gosec // clampSize bounds them
@@ -171,19 +178,8 @@ func atomBytes(atoms ...xproto.Atom) []byte {
 	return b
 }
 
-// find returns the window with an engine id.
-func (h *Host) find(id engine.Window) *window {
-	for _, win := range h.windows {
-		if win.id == id {
-			return win
-		}
-	}
-
-	return nil
-}
-
 // findX returns the open window with an X id.
-func (h *Host) findX(xid xproto.Window) *window {
+func (h *host) findX(xid xproto.Window) *window {
 	for _, win := range h.windows {
 		if win.xid == xid && xid != 0 {
 			return win
@@ -193,37 +189,29 @@ func (h *Host) findX(xid xproto.Window) *window {
 	return nil
 }
 
-// WindowShow implements engine.Host.
-func (h *Host) WindowShow(id engine.Window) {
-	if win := h.find(id); win != nil && win.xid != 0 {
-		xproto.MapWindow(h.c, win.xid)
+// show maps the window.
+func (win *window) show() {
+	if win.xid != 0 {
+		xproto.MapWindow(win.host.c, win.xid)
 
 		win.renderPending = true
 	}
 }
 
-// WindowFree implements engine.Host.
-func (h *Host) WindowFree(id engine.Window) {
-	win := h.find(id)
-	if win == nil {
-		return
-	}
+// free is Window.Close: the X window, then the Headless, which waits if a handler is
+// running.
+func (win *window) free() {
+	h := win.host
 
 	win.close()
-	h.kit.ContextSetEmitHost(win.ctx)
-	h.kit.RasterFree(win.raster)
+	win.freed = true
+	win.hl.Close()
 
-	for i, other := range h.windows {
-		if other == win {
-			h.windows = append(h.windows[:i], h.windows[i+1:]...)
-
-			break
-		}
-	}
+	h.windows = slices.DeleteFunc(h.windows, func(other *window) bool { return other == win })
 }
 
 // close destroys the X window, which can also come from the window manager's close
-// button. The window stays until WindowFree, as its context does.
+// button. The Headless stays until Window.Close.
 func (win *window) close() {
 	if win.xid == 0 {
 		return
@@ -240,7 +228,8 @@ func (win *window) forget() {
 	win.host.open--
 }
 
-// render draws what changed into the raster and presents it.
+// render draws what changed into the raster and presents it. Should a handler run during
+// the render and close the window, the Headless is gone, so the window checks first.
 func (win *window) render() {
 	win.renderPending = false
 
@@ -248,96 +237,82 @@ func (win *window) render() {
 	full := win.full || resized
 	win.full = false
 
-	regions := win.host.kit.RenderDamage(win.ctx, win.raster, win.w, win.h, full)
+	win.hl.Resize(win.w, win.h)
+	win.damage = win.hl.RenderDamage(full)
 	win.rasterW, win.rasterH = win.w, win.h
 
-	if regions > 0 || full {
+	if win.xid == 0 {
+		return
+	}
+
+	if len(win.damage) > 0 || full {
 		win.present(full)
 	}
 
-	if win.host.kit.Animating(win.ctx) {
+	if win.hl.Animating() {
 		win.renderPending = true
 	}
 }
 
-// present sends the raster, or just what the last render damaged. The damage comes
-// first, as the view of the pixels is only good until the next kit call.
+// present sends the raster, or just what the last render damaged.
 func (win *window) present(all bool) {
-	damage := []engine.Rect{{X: 0, Y: 0, W: win.rasterW, H: win.rasterH}}
-	if !all {
-		damage = win.host.kit.RasterDamage(win.raster)
+	damage := win.damage
+	if all {
+		damage = []image.Rectangle{image.Rect(0, 0, win.rasterW, win.rasterH)}
 	}
 
-	pixels := win.host.kit.RasterView(win.raster)
-
 	for _, d := range damage {
-		win.host.putRect(win, pixels, d)
+		win.host.putRect(win, d)
 	}
 }
 
 // putRect sends a rectangle in as many requests as the server's limit asks for. A server
 // may take requests as short as 16 KiB, so a row that does not fit one goes in columns.
-func (h *Host) putRect(win *window, pixels []byte, d engine.Rect) {
+// Each request's pixels are copied once, into a buffer that serves them all, as xgb
+// copies them into its request right away.
+func (h *host) putRect(win *window, d image.Rectangle) {
 	const pixelSize = 4
 
-	stride := pixelSize * win.rasterW
-	row := pixelSize * d.W
-
-	if row <= 0 || d.H <= 0 {
+	if d.Empty() {
 		return
 	}
 
-	if cols := h.maxData / pixelSize; d.W > cols {
-		for x := d.X; x < d.X+d.W; x += cols {
-			h.putRect(win, pixels, engine.Rect{X: x, Y: d.Y, W: min(cols, d.X+d.W-x), H: d.H})
+	if cols := h.maxData / pixelSize; d.Dx() > cols {
+		for x := d.Min.X; x < d.Max.X; x += cols {
+			h.putRect(win, image.Rect(x, d.Min.Y, min(x+cols, d.Max.X), d.Max.Y))
 		}
 
 		return
 	}
 
-	rowsPerRequest := h.maxData / row
+	rowsPerRequest := h.maxData / (pixelSize * d.Dx())
 
-	for y := d.Y; y < d.Y+d.H; y += rowsPerRequest {
-		rows := min(rowsPerRequest, d.Y+d.H-y)
-
-		var data []byte
-
-		if d.W == win.rasterW {
-			data = pixels[y*stride : (y+rows)*stride]
-		} else {
-			// xgb copies this into its request right away, so one buffer serves them all.
-			data = h.putBuf[:0]
-
-			for r := y; r < y+rows; r++ {
-				start := r*stride + d.X*pixelSize
-				data = append(data, pixels[start:start+row]...)
-			}
-
-			h.putBuf = data
-		}
+	for y := d.Min.Y; y < d.Max.Y; y += rowsPerRequest {
+		rows := min(rowsPerRequest, d.Max.Y-y)
+		h.putBuf = win.hl.CopyBGRA(h.putBuf[:0], image.Rect(d.Min.X, y, d.Max.X, y+rows))
 
 		xproto.PutImage(h.c, xproto.ImageFormatZPixmap, xproto.Drawable(win.xid), win.gc,
-			uint16(d.W), uint16(rows), int16(d.X), int16(y), //nolint:gosec // bounded by the window's size
-			0, rasterDepth, data)
+			uint16(d.Dx()), uint16(rows), int16(d.Min.X), int16(y), //nolint:gosec // bounded by the window's size
+			0, rasterDepth, h.putBuf)
 	}
 }
 
-// Request implements engine.WindowHost.
-func (win *window) Request() {
+// Redraw implements bui.Host.
+func (win *window) Redraw() {
 	if win.xid != 0 {
 		win.renderPending = true
 	}
 }
 
-// SetCursor implements engine.WindowHost.
-func (win *window) SetCursor(cursor int) {
+// SetCursor implements bui.Host.
+func (win *window) SetCursor(cursor bui.Cursor) {
 	if win.xid != 0 {
-		xproto.ChangeWindowAttributes(win.host.c, win.xid, xproto.CwCursor, []uint32{uint32(win.host.cursor(cursor))})
+		xproto.ChangeWindowAttributes(win.host.c, win.xid, xproto.CwCursor, []uint32{uint32(win.host.cursor(int(cursor)))})
 	}
 }
 
 // cursor returns the X cursor for a BK_CURSOR_* value, creating it at first use.
-func (h *Host) cursor(cursor int) xproto.Cursor {
+func (h *host) cursor(cursor int) xproto.Cursor {
 	cursor = min(max(cursor, 0), cursorCount-1)
 	if h.cursors[cursor] != 0 {
 		return h.cursors[cursor]
@@ -361,7 +336,7 @@ func (h *Host) cursor(cursor int) xproto.Cursor {
 
 // createFontCursor makes a black cursor with a white outline, as XCreateFontCursor does:
 // the mask is the next glyph of the font.
-func (h *Host) createFontCursor(id xproto.Cursor, glyph uint16) {
+func (h *host) createFontCursor(id xproto.Cursor, glyph uint16) {
 	const maxColor = 0xffff
 
 	if h.cursorFont == 0 {
@@ -382,7 +357,7 @@ func (h *Host) createFontCursor(id xproto.Cursor, glyph uint16) {
 
 // createEmptyCursor makes a cursor from a 1 x 1 bitmap of zeros. A new pixmap's content
 // is undefined, so it has to be cleared with a fill.
-func (h *Host) createEmptyCursor(id xproto.Cursor) {
+func (h *host) createEmptyCursor(id xproto.Cursor) {
 	pixmap, err := xproto.NewPixmapId(h.c)
 	if err != nil {
 		return
@@ -401,16 +376,16 @@ func (h *Host) createEmptyCursor(id xproto.Cursor) {
 	xproto.FreePixmap(h.c, pixmap)
 }
 
-// Warp implements engine.WindowHost.
+// Warp implements bui.Host.
 func (win *window) Warp(x, y int) {
 	if win.xid != 0 {
 		xproto.WarpPointer(win.host.c, 0, win.xid, 0, 0, 0, 0, int16(x), int16(y)) //nolint:gosec // window coordinates
 	}
 }
 
-// Schedule implements engine.WindowHost.
-func (win *window) Schedule(ms, timer int) {
-	due := time.Now().Add(time.Duration(ms) * time.Millisecond)
+// Schedule implements bui.Host.
+func (win *window) Schedule(after time.Duration, timer bui.Timer) {
+	due := time.Now().Add(after)
 	if timer == timerCustom {
 		win.customDue = due
 
@@ -420,15 +395,16 @@ func (win *window) Schedule(ms, timer int) {
 	win.tipID, win.tipDue = timer, due
 }
 
-// runTimers fires what is due. A timer is cleared first, as firing can schedule it again.
+// runTimers fires what is due. A timer is cleared first, as firing can schedule it again,
+// and the window can be closed by the first, in which case the Headless is gone.
 func (win *window) runTimers(now time.Time) {
 	if !win.tipDue.IsZero() && !win.tipDue.After(now) {
 		win.tipDue = time.Time{}
-		win.host.kit.Timer(win.ctx, win.tipID)
+		win.hl.Timer(win.tipID)
 	}
 
 	if win.xid != 0 && !win.customDue.IsZero() && !win.customDue.After(now) {
 		win.customDue = time.Time{}
-		win.host.kit.Timer(win.ctx, timerCustom)
+		win.hl.Timer(timerCustom)
 	}
 }

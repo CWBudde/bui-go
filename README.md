@@ -14,7 +14,8 @@ binary:
 CGO_ENABLED=0 go run ./examples/counter
 ```
 
-On Windows that example exits with `ErrNoDisplay`, as it has no window host yet. On macOS it opens a window with a menu, which
+On Linux the example opens its window through package [`x11`](#windows-on-linux), on either engine. On Windows it exits with
+`ErrNoDisplay`, as it has no window host yet. On macOS it opens a window with a menu, which
 takes the mouse, scroll and keys, quits with Cmd+Q, keeps drawing while you drag its edge and follows a move to a screen of
 another scale. To render without a window, drive the tree with `Headless`, which renders into memory and takes
 synthetic input. It works on Linux too, also with no display. In a module that requires `github.com/CWBudde/bui-go`, this prints
@@ -84,7 +85,11 @@ Host methods run inside the kit call that caused them, so they note what to do a
 CI runs the tests on macOS, including the Cocoa host's tests, which open real windows, but only cross-builds for Windows, so that platform is
 untested.
 
-In a window program, the same calls look like this:
+### Windows on Linux
+
+Package `github.com/CWBudde/bui-go/x11` is such a program: an X11 window host in pure Go, built on `Headless` and `bui.Host`
+alone, on either engine. It has a `NewWindow`, `Run` and `Quit` of its own, and on Linux these replace package `bui`'s, which
+report `ErrNoDisplay` there without cgo:
 
 ```go
 button := bui.NewNode("button")
@@ -93,20 +98,34 @@ root.Add(button)
 button.Pack(bui.PackOptions{Fill: bui.FillX})
 button.OnClick(func() { /* runs on the UI thread */ })
 
+win, err := x11.NewWindow(root, "Counter", 320, 160)
+if err != nil {
+	log.Fatal(err) // bui.ErrNoDisplay without an X server
+}
+win.Show()
+
 bui.Do(func() { clock.SetStr("text", "updated") }) // safe from any goroutine
+err = x11.Run() // runs Do functions too, until x11.Quit or the last window closes
+win.Close()
+root.Close()
 ```
+
+It sends what `Headless` takes, so a middle click and key releases don't reach the kit. A panic in a `Do` function propagates
+from `x11.Run`, as no kit frame is on the stack then. One in a handler ends the process, as anywhere. With cgo, package `bui`'s
+`NewWindow` still opens the kit's own X11 windows, and on macOS its Cocoa ones, until those move to packages of their own too.
 
 ## Engines
 
 The same API runs on two engines, chosen when you build:
 
-| Build                                 | Engine                                                                              | Windows                                     | Needs               |
-| ------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------- | ------------------- |
-| Linux amd64 with cgo                  | Native: static libraries in `lib/`                                                  | X11, and Wayland on request                 | C and C++ toolchain |
-| Anything else, or the tag `bui_nocgo` | WebAssembly: an embedded module, in [wazero](https://github.com/tetratelabs/wazero) | X11 on Linux and Cocoa on macOS, in pure Go | Nothing but Go      |
+| Build                                 | Engine                                                                              | Windows                                    | Needs               |
+| ------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------ | ------------------- |
+| Linux amd64 with cgo                  | Native: static libraries in `lib/`                                                  | X11, and Wayland on request; package `x11` | C and C++ toolchain |
+| Anything else, or the tag `bui_nocgo` | WebAssembly: an embedded module, in [wazero](https://github.com/tetratelabs/wazero) | Package `x11` on Linux, Cocoa on macOS     | Nothing but Go      |
 
 `go build -tags bui_nocgo` selects the wasm engine on a machine that would otherwise use cgo. Both engines draw the same
-pixels: the tests compare them exactly. On Windows the wasm engine runs headless, and `NewWindow` and `Run` report `ErrNoDisplay`.
+pixels: the tests compare them exactly. On Windows, and on Linux without cgo, the wasm engine's `NewWindow` and `Run` report
+`ErrNoDisplay`; on Linux, package `x11` opens the windows.
 On macOS they open a window with mouse, scroll, keys, cursors, the clipboard, a menu, live resize and scale changes between
 screens.
 
@@ -143,7 +162,7 @@ that time. The module loads at the first kit call, so importing the package cost
 
 ## Threading
 
-Call `bui.Run` from the main goroutine. Kit calls are valid only on the UI thread: the main goroutine before and after
+Call `bui.Run`, or `x11.Run`, from the main goroutine. Kit calls are valid only on the UI thread: the main goroutine before and after
 `Run`, and handlers and `Do` functions during it. Other goroutines reach the UI thread through `bui.Do`.
 
 ## Known limits
@@ -161,12 +180,13 @@ xvfb-run -a go test -race ./...                       # native engine, compared 
 xvfb-run -a go test -race -tags bui_nocgo ./...       # package bui on the wasm engine
 CGO_ENABLED=0 xvfb-run -a go test ./...               # with no cgo at all
 CC=gcc LSAN_OPTIONS=suppressions=$PWD/scripts/lsan.supp xvfb-run -a go test -asan -ldflags='-s=false -w=false' ./...
-BUI_TEST_XDOTOOL=1 xvfb-run -a go test -race -run '^TestX' .
-go test -tags bui_xlibref ./internal/host/x11/        # key translation against libX11, needs its headers
+BUI_TEST_XDOTOOL=1 xvfb-run -a go test -race -run '^TestX' . ./x11/
+go test -tags bui_xlibref ./x11/                      # key translation against libX11, needs its headers
 ```
 
 Tests that need a window are skipped when there is no display. `BUI_TEST_XDOTOOL=1` sends real clicks and keys and changes
-the keyboard layout, so use a display of its own. `internal/host/x11` starts its own Xvfb when it can.
+the keyboard layout, so use a display of its own. Package `x11`'s tests start their own Xvfb when they can, and run on
+whichever engine the build selects.
 
 ## Development
 

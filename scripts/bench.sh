@@ -30,6 +30,6 @@ cd "$root"
 	printf '# %s, load: %s\n' "$(git rev-parse HEAD)" "$(load)"
 	go test -run '^$' -bench . -benchmem -benchtime 200x -count "$count" ./internal/enginetest/
 	if command -v xvfb-run >/dev/null; then
-		xvfb-run -a go test -run '^$' -bench . -benchmem -benchtime 100x -count "$count" ./internal/host/x11/
+		xvfb-run -a go test -run '^$' -bench . -benchmem -benchtime 100x -count "$count" ./x11/
 	fi
 } | tee "$out"
